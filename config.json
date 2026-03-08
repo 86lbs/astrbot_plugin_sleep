@@ -1,0 +1,104 @@
+{
+    "sleep_commands": {
+        "description": "睡觉指令",
+        "type": "string",
+        "default": "睡觉,sleep",
+        "hint": "触发睡觉的指令，多个用逗号分隔"
+    },
+    "wake_commands": {
+        "description": "起床指令",
+        "type": "string",
+        "default": "起床,醒来,wake",
+        "hint": "触发起床的指令，多个用逗号分隔"
+    },
+    "require_prefix": {
+        "description": "是否需要前缀触发",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，指令需要加上配置的唤醒前缀才能触发"
+    },
+    "sleep_require_admin": {
+        "description": "睡觉是否需要管理员权限",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，只有管理员才能触发睡觉指令"
+    },
+    "wake_require_admin": {
+        "description": "起床是否需要管理员权限",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，只有管理员才能触发起床指令"
+    },
+    "default_duration": {
+        "description": "默认睡觉时长（秒）",
+        "type": "int",
+        "default": 600,
+        "hint": "不指定时长时的默认睡觉时间，范围 0-86400 秒（0-24小时）"
+    },
+    "sleep_reply": {
+        "description": "睡觉回复语",
+        "type": "string",
+        "default": "好的，我去睡觉了~💤",
+        "hint": "支持变量: {duration}(时长秒), {expiry_time}(到期时间)"
+    },
+    "wake_reply": {
+        "description": "起床回复语",
+        "type": "string",
+        "default": "早安~我醒来了☀️",
+        "hint": "支持变量: {duration}(已睡觉时长秒), {expiry_time}(当前时间)"
+    },
+    "llm_tool_enabled": {
+        "description": "启用 LLM 工具",
+        "type": "bool",
+        "default": true,
+        "hint": "允许 LLM 调用睡觉工具"
+    },
+    "scheduled_sleep_enabled": {
+        "description": "启用定时睡觉",
+        "type": "bool",
+        "default": false,
+        "hint": "在指定时间段自动睡觉"
+    },
+    "scheduled_sleep_times": {
+        "description": "定时睡觉时间段",
+        "type": "string",
+        "default": "23:00-07:00",
+        "hint": "每行一个时间段，格式: HH:MM-HH:MM，如 23:00-07:00 表示晚上11点到早上7点"
+    },
+    "spam_detect_enabled": {
+        "description": "启用刷屏检测",
+        "type": "bool",
+        "default": false,
+        "hint": "启用群消息计数功能，用于刷屏检测"
+    },
+    "spam_threshold": {
+        "description": "刷屏检测阈值",
+        "type": "int",
+        "default": 10,
+        "hint": "每分钟消息数阈值，用于刷屏检测"
+    },
+    "spam_window": {
+        "description": "刷屏检测窗口（秒）",
+        "type": "int",
+        "default": 60,
+        "hint": "消息计数的时间窗口"
+    },
+    "group_card_update_enabled": {
+        "description": "启用群昵称更新",
+        "type": "bool",
+        "default": false,
+        "hint": "睡觉时更新群昵称显示剩余时间（仅支持 QQ）"
+    },
+    "group_card_template": {
+        "description": "群昵称模板",
+        "type": "string",
+        "default": "{original_name}[睡觉中 {remaining}分钟]",
+        "hint": "支持变量: {original_name}(原始昵称), {original_card}(原始群名片), {original_nickname}(原始QQ昵称), {remaining}(剩余分钟)"
+    },
+    "priority": {
+        "description": "插件优先级",
+        "type": "int",
+        "default": 10000,
+        "hint": "事件处理优先级，数值越大优先级越高"
+    }
+}
