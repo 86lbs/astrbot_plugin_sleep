@@ -14,7 +14,7 @@
   "default_duration": {
     "type": "int",
     "description": "默认睡觉时长(秒)",
-    "hint": "范围0-43200秒",
+    "hint": "范围1-43200秒，默认600秒(10分钟)",
     "default": 600
   },
   "sleep_reply": {
@@ -26,13 +26,25 @@
   "wake_reply": {
     "type": "string",
     "description": "起床时的回复消息",
-    "hint": "支持占位符 {duration}(睡觉时长，秒)和 {expiry_time}(睡觉结束时间)",
+    "hint": "支持占位符 {duration}(已睡觉时长，秒)",
     "default": "早安~我醒来了☀️"
   },
   "require_prefix": {
     "type": "bool",
     "description": "是否需要命令前缀",
-    "default": true
+    "default": false
+  },
+  "sleep_require_admin": {
+    "type": "bool",
+    "description": "睡觉是否需要管理员权限",
+    "hint": "开启后，只有管理员才能使用睡觉指令",
+    "default": false
+  },
+  "wake_require_admin": {
+    "type": "bool",
+    "description": "起床是否需要管理员权限",
+    "hint": "开启后，只有管理员才能使用起床指令",
+    "default": false
   },
   "priority": {
     "type": "int",
@@ -52,6 +64,24 @@
     "hint": "每行一个时间段，格式: HH:MM-HH:MM (24小时制)\n例如:\n23:00-07:00 (晚11点到早7点)\n12:00-14:00 (中午12点到下午2点)\n支持跨天时间段",
     "default": "23:00-07:00"
   },
+  "spam_detect_enabled": {
+    "type": "bool",
+    "description": "启用刷屏检测",
+    "hint": "启用群消息计数功能，用于刷屏检测",
+    "default": false
+  },
+  "spam_threshold": {
+    "type": "int",
+    "description": "刷屏检测阈值",
+    "hint": "时间窗口内的消息数阈值",
+    "default": 10
+  },
+  "spam_window": {
+    "type": "int",
+    "description": "刷屏检测窗口(秒)",
+    "hint": "消息计数的时间窗口",
+    "default": 60
+  },
   "group_card_update_enabled": {
     "type": "bool",
     "description": "启用群昵称剩余时长显示",
@@ -60,20 +90,20 @@
   },
   "group_card_template": {
     "type": "string",
-    "description": "群昵称显示模板",
-    "hint": "支持占位符:\n {remaining} - 剩余分钟数\n {original_card} - 原始群昵称(群名片)\n {original_nickname} - 原始QQ昵称\n {original_name} - 原始名称(优先使用群昵称，若无则使用QQ昵称)",
-    "default": "{original_name}[睡觉中 {remaining}分钟]"
+    "description": "群昵称显示模板(指令触发)",
+    "hint": "支持占位符:\n {remaining} - 剩余时间\n {remaining_seconds} - 剩余秒数\n {original_card} - 原始群昵称(群名片)\n {original_nickname} - 原始QQ昵称\n {original_name} - 原始名称(优先使用群昵称，若无则使用QQ昵称)",
+    "default": "{original_name}[睡觉中 {remaining}]"
+  },
+  "group_card_template_auto": {
+    "type": "string",
+    "description": "群昵称显示模板(自判定休眠)",
+    "hint": "LLM自判定休眠时使用的模板，支持占位符同上",
+    "default": "{original_name}[静默中 {remaining}]"
   },
   "llm_tool_enabled": {
     "type": "bool",
     "description": "启用 LLM 工具调用",
     "hint": "开启后，LLM 可以主动调用睡觉/起床功能",
     "default": true
-  },
-  "require_admin": {
-    "type": "bool",
-    "description": "需要管理员权限",
-    "hint": "开启后，只有 bot 管理员才能使用睡觉/起床指令",
-    "default": false
   }
 }
