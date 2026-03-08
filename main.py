@@ -40,10 +40,10 @@ class SleepPlugin(Star):
         if isinstance(self.wake_cmds, str):
             self.wake_cmds = re.split(r"[\s,]+", self.wake_cmds)
 
-        # 限制 default_duration 范围在 0-86400 秒(0-24小时)
+        # 限制 default_duration 范围在 0-43200 秒(0-12小时)
         duration_config = config.get("default_duration", 600)
         if not isinstance(duration_config, (int, float)) or not (
-            0 <= duration_config <= 86400
+            0 <= duration_config <= 43200
         ):
             logger.warning(
                 f"[Sleep] ⚠️ default_duration 配置无效({duration_config})，使用默认值 600s"
@@ -60,7 +60,11 @@ class SleepPlugin(Star):
         # 群昵称更新配置
         self.group_card_enabled = config.get("group_card_update_enabled", False)
         self.group_card_template = config.get(
-            "group_card_template", "{original_name}[睡觉中 {remaining}分钟]"
+            "group_card_template", "{original_name}[睡觉中 {remaining}]"
+        )
+        # 自判定休眠的群昵称模板
+        self.group_card_template_auto = config.get(
+            "group_card_template_auto", "{original_name}[静默中 {remaining}]"
         )
         self.original_group_cards = {}
         self.original_nicknames = {}
@@ -74,13 +78,13 @@ class SleepPlugin(Star):
 
         # 刷屏检测配置
         self.spam_detect_enabled = config.get("spam_detect_enabled", False)
-        self.spam_threshold = config.get("spam_threshold", 10)  # 每分钟消息数阈值
-        self.spam_window = config.get("spam_window", 60)  # 检测窗口（秒）
+        self.spam_threshold = config.get("spam_threshold", 10)
+        self.spam_window = config.get("spam_window", 60)
         
-        # 群消息计数器 {origin: deque([timestamp1, timestamp2, ...])}
+        # 群消息计数器
         self.message_counters: dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
         
-        # 自动解开的睡觉记录 {origin: {"expiry": timestamp, "auto_wake_threshold": int, "reason": str}}
+        # 自动解开的睡觉记录
         self.auto_wake_sleep_map: dict[str, dict] = {}
 
         self.sleep_map = {}
@@ -93,11 +97,9 @@ class SleepPlugin(Star):
         self.sleep_map_path = self.data_dir / "sleep_map.json"
         self._load_sleep_map()
 
-        # 群昵称更新任务
+        # 后台任务
         self._update_task = None
         self._update_task_started = False
-        
-        # 自动解开检测任务
         self._auto_wake_task = None
         self._auto_wake_task_started = False
 
@@ -125,7 +127,23 @@ class SleepPlugin(Star):
         logger.info(f"[Sleep] 已加载 | " + " | ".join(log_parts))
 
         if self.group_card_enabled:
-            logger.info(f"[Sleep] 群昵称更新已启用 | 模板: {self.group_card_template}")
+            logger.info(f"[Sleep] 群昵称更新已启用 | 普通模板: {self.group_card_template} | 自动模板: {self.group_card_template_auto}")
+
+    def _format_remaining_time(self, seconds: int) -> str:
+        """格式化剩余时间显示
+        
+        大于1小时显示为 X.X小时
+        小于1小时显示为 X分钟
+        """
+        if seconds <= 0:
+            return "0分钟"
+        
+        hours = seconds / 3600
+        if hours >= 1:
+            return f"{hours:.1f}小时"
+        else:
+            minutes = seconds / 60
+            return f"{int(minutes)}分钟"
 
     def _parse_time_ranges(self, time_text: str) -> list[tuple[str, str]]:
         """解析时间范围文本"""
@@ -163,14 +181,11 @@ class SleepPlugin(Star):
                 # 兼容旧格式
                 if isinstance(data, dict):
                     if all(isinstance(v, (int, float)) for v in data.values()):
-                        # 旧格式：{origin: expiry_timestamp}
                         self.sleep_map = {k: float(v) for k, v in data.items()}
                     else:
-                        # 新格式：可能包含自动解开配置
                         self.sleep_map = {}
                         for k, v in data.items():
                             if isinstance(v, dict):
-                                # 带自动解开配置的记录
                                 self.sleep_map[k] = float(v.get("expiry", 0))
                                 if "auto_wake_threshold" in v:
                                     self.auto_wake_sleep_map[k] = v
@@ -184,7 +199,6 @@ class SleepPlugin(Star):
 
     def _save_sleep_map(self):
         try:
-            # 合并普通睡觉记录和自动解开记录
             data = {}
             for k, v in self.sleep_map.items():
                 if k in self.auto_wake_sleep_map:
@@ -260,11 +274,9 @@ class SleepPlugin(Star):
         now = time.time()
         counter = self.message_counters[origin]
         
-        # 移除过期的记录
         while counter and counter[0] < now - self.spam_window:
             counter.popleft()
         
-        # 添加新记录
         counter.append(now)
         
         return len(counter)
@@ -274,16 +286,22 @@ class SleepPlugin(Star):
         now = time.time()
         counter = self.message_counters[origin]
         
-        # 移除过期的记录
         while counter and counter[0] < now - self.spam_window:
             counter.popleft()
         
         return len(counter)
 
     async def _update_group_card(
-        self, event: AstrMessageEvent, origin: str, remaining_minutes: int
+        self, event: AstrMessageEvent, origin: str, remaining_seconds: int, is_auto_sleep: bool = False
     ) -> None:
-        """更新群昵称显示剩余时长"""
+        """更新群昵称显示剩余时长
+        
+        Args:
+            event: 消息事件
+            origin: 消息来源
+            remaining_seconds: 剩余秒数
+            is_auto_sleep: 是否是自判定休眠
+        """
         if not self.group_card_enabled:
             return
 
@@ -325,20 +343,28 @@ class SleepPlugin(Star):
                     self.original_group_cards[origin] = ""
                     self.original_nicknames[origin] = ""
 
-            if remaining_minutes > 0:
+            if remaining_seconds > 0:
                 original_card = self.original_group_cards.get(origin, "")
                 original_nickname = self.original_nicknames.get(origin, "")
                 original_name = original_card if original_card else original_nickname
+                
+                # 格式化剩余时间
+                remaining_str = self._format_remaining_time(remaining_seconds)
+                
+                # 根据是否是自判定休眠选择模板
+                template = self.group_card_template_auto if is_auto_sleep else self.group_card_template
 
                 try:
-                    card = self.group_card_template.format(
-                        remaining=remaining_minutes,
+                    card = template.format(
+                        remaining=remaining_str,
+                        remaining_seconds=remaining_seconds,
                         original_card=original_card,
                         original_nickname=original_nickname,
                         original_name=original_name,
                     )
-                except KeyError:
-                    card = f"[睡觉中 {remaining_minutes}分钟]"
+                except KeyError as e:
+                    logger.warning(f"[Sleep] 群昵称模板占位符错误: {e}")
+                    card = f"[{'静默' if is_auto_sleep else '睡觉'}中 {remaining_str}]"
             else:
                 card = self.original_group_cards.get(origin, "")
 
@@ -371,16 +397,17 @@ class SleepPlugin(Star):
 
                 current_time = time.time()
                 for origin, expiry in list(self.sleep_map.items()):
-                    remaining_seconds = expiry - current_time
+                    remaining_seconds = int(expiry - current_time)
                     if remaining_seconds > 0:
-                        remaining_minutes = max(1, int(remaining_seconds / 60))
                         event = self.origin_to_event_map.get(origin)
                         if event:
-                            await self._update_group_card(event, origin, remaining_minutes)
+                            # 检查是否是自判定休眠
+                            is_auto = origin in self.auto_wake_sleep_map
+                            await self._update_group_card(event, origin, remaining_seconds, is_auto)
                     else:
                         event = self.origin_to_event_map.get(origin)
                         if event:
-                            await self._update_group_card(event, origin, 0)
+                            await self._update_group_card(event, origin, 0, False)
                         self.original_group_cards.pop(origin, None)
                         self.original_nicknames.pop(origin, None)
                         self.origin_to_event_map.pop(origin, None)
@@ -405,21 +432,18 @@ class SleepPlugin(Star):
         """定时检测是否满足自动解开条件"""
         try:
             while True:
-                await asyncio.sleep(10)  # 每10秒检测一次
+                await asyncio.sleep(10)
 
                 if not self.auto_wake_sleep_map:
                     continue
 
                 current_time = time.time()
                 for origin, config in list(self.auto_wake_sleep_map.items()):
-                    # 检查是否过期
                     expiry = config.get("expiry", 0)
                     if current_time >= expiry:
-                        # 过期了，自动解开
                         await self._auto_wake(origin, "睡觉时间已到")
                         continue
 
-                    # 检查消息速率是否低于阈值
                     threshold = config.get("auto_wake_threshold", 0)
                     if threshold > 0:
                         rate = self._get_message_rate(origin)
@@ -442,18 +466,16 @@ class SleepPlugin(Star):
         self.auto_wake_sleep_map.pop(origin, None)
         self._save_sleep_map()
 
-        # 恢复群昵称
         if self.group_card_enabled:
             event = self.origin_to_event_map.get(origin)
             if event:
-                await self._update_group_card(event, origin, 0)
+                await self._update_group_card(event, origin, 0, False)
             self.original_group_cards.pop(origin, None)
             self.original_nicknames.pop(origin, None)
             self.origin_to_event_map.pop(origin, None)
 
         logger.info(f"[Sleep] 🌅 自动起床 | 来源: {origin} | 原因: {reason}")
         
-        # 尝试发送通知
         try:
             event = self.origin_to_event_map.get(origin)
             if event:
@@ -468,21 +490,17 @@ class SleepPlugin(Star):
         text = event.get_message_str().strip()
         origin = event.unified_msg_origin
 
-        # 更新消息计数器
         if self.spam_detect_enabled:
             self._update_message_counter(origin)
 
-        # 检查是否是控制指令
         is_sleep_cmd = any(text.startswith(cmd) for cmd in self.sleep_cmds)
         is_wake_cmd = any(text.startswith(cmd) for cmd in self.wake_cmds)
 
-        # 处理控制指令
         if is_sleep_cmd or is_wake_cmd:
             if not self._check_prefix(event):
                 return
 
             if is_sleep_cmd:
-                # 检查睡觉权限
                 if self.sleep_require_admin and not self._check_admin(event):
                     yield event.plain_result("⚠️ 只有管理员才能让我睡觉")
                     event.stop_event()
@@ -494,7 +512,6 @@ class SleepPlugin(Star):
                 return
 
             if is_wake_cmd:
-                # 检查起床权限
                 if self.wake_require_admin and not self._check_admin(event):
                     yield event.plain_result("⚠️ 只有管理员才能叫我起床")
                     event.stop_event()
@@ -505,14 +522,12 @@ class SleepPlugin(Star):
                 event.stop_event()
                 return
 
-        # 检查定时睡觉
         if self._is_in_scheduled_time():
             logger.debug("[Sleep] ⏰ 定时睡觉生效中")
             event.should_call_llm(False)
             event.stop_event()
             return
 
-        # 检查睡觉状态
         expiry = self.sleep_map.get(origin)
         if expiry:
             if time.time() < expiry:
@@ -521,7 +536,6 @@ class SleepPlugin(Star):
                 event.should_call_llm(False)
                 event.stop_event()
             else:
-                # 睡觉已过期
                 logger.info("[Sleep] ⏰ 睡觉已自动结束")
                 self.sleep_map.pop(origin, None)
                 self.auto_wake_sleep_map.pop(origin, None)
@@ -530,7 +544,7 @@ class SleepPlugin(Star):
                 if self.group_card_enabled:
                     saved_event = self.origin_to_event_map.get(origin)
                     if saved_event:
-                        await self._update_group_card(saved_event, origin, 0)
+                        await self._update_group_card(saved_event, origin, 0, False)
                     self.original_group_cards.pop(origin, None)
                     self.original_nicknames.pop(origin, None)
                     self.origin_to_event_map.pop(origin, None)
@@ -541,7 +555,6 @@ class SleepPlugin(Star):
         self, event: AstrMessageEvent, text: str, origin: str
     ) -> str:
         """处理睡觉指令"""
-        # 解析时长
         duration = self.default_duration
         for cmd in self.sleep_cmds:
             if text.startswith(cmd):
@@ -552,21 +565,22 @@ class SleepPlugin(Star):
                     duration = val * self.TIME_UNITS.get(unit, 1)
                 break
 
-        # 设置睡觉
+        # 指令触发最大时长限制为12小时
+        max_duration = 43200  # 12小时
+        if duration > max_duration:
+            duration = max_duration
+            logger.info(f"[Sleep] 睡觉时长已限制为最大值 12 小时")
+
         self.sleep_map[origin] = time.time() + duration
         self._save_sleep_map()
 
-        # 保存 event 到映射
         self.origin_to_event_map[origin] = event
 
-        # 启动任务
         await self._ensure_update_task_started()
         await self._ensure_auto_wake_task_started()
 
-        # 更新群昵称
         if self.group_card_enabled:
-            remaining_minutes = max(1, int(duration / 60))
-            await self._update_group_card(event, origin, remaining_minutes)
+            await self._update_group_card(event, origin, duration, is_auto_sleep=False)
 
         expiry_time = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(self.sleep_map[origin])
@@ -579,20 +593,17 @@ class SleepPlugin(Star):
         self, event: AstrMessageEvent, origin: str
     ) -> str:
         """处理起床指令"""
-        # 计算已睡觉时长
         old_expiry = self.sleep_map.get(origin)
         duration = 0
         if old_expiry:
             duration = int(max(0, time.time() - (old_expiry - self.default_duration)))
 
-        # 解除睡觉
         self.sleep_map.pop(origin, None)
         self.auto_wake_sleep_map.pop(origin, None)
         self._save_sleep_map()
 
-        # 恢复群昵称
         if self.group_card_enabled:
-            await self._update_group_card(event, origin, 0)
+            await self._update_group_card(event, origin, 0, False)
             self.original_group_cards.pop(origin, None)
             self.original_nicknames.pop(origin, None)
             self.origin_to_event_map.pop(origin, None)
@@ -613,7 +624,7 @@ class SleepPlugin(Star):
             return "LLM 工具未启用"
 
         duration_seconds = duration * self.TIME_UNITS.get(unit, 60)
-        max_duration = 3600
+        max_duration = 3600  # 1小时
         if duration_seconds > max_duration:
             duration_seconds = max_duration
 
@@ -626,8 +637,7 @@ class SleepPlugin(Star):
         await self._ensure_auto_wake_task_started()
 
         if self.group_card_enabled:
-            remaining_minutes = max(1, int(duration_seconds / 60))
-            await self._update_group_card(event, origin, remaining_minutes)
+            await self._update_group_card(event, origin, duration_seconds, is_auto_sleep=False)
 
         expiry_time = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(self.sleep_map[origin])
@@ -654,27 +664,25 @@ class SleepPlugin(Star):
         5. 或者超过最大时长时起床
 
         Args:
-            max_duration(number): 最大睡觉时长（分钟），默认30分钟，最长60分钟
+            max_duration(number): 最大睡觉时长（分钟），默认30分钟，最长3小时
             auto_wake_threshold(number): 自动起床的消息速率阈值（每分钟消息数），默认5条
             reason(string): 睡觉原因，如"群聊刷屏"、"消息过多"等
         """
         if not self.config.get("llm_tool_enabled", False):
             return "LLM 工具未启用"
 
-        # 限制最大时长
-        max_duration = min(max_duration, 60)
+        # 自判定休眠最大时长限制为3小时
+        max_allowed = 180  # 3小时
+        max_duration = min(max_duration, max_allowed)
         duration_seconds = max_duration * 60
 
-        # 获取自动起床阈值（使用配置或参数）
         threshold = auto_wake_threshold if auto_wake_threshold > 0 else self.spam_threshold
 
         origin = event.unified_msg_origin
         expiry = time.time() + duration_seconds
 
-        # 设置睡觉状态
         self.sleep_map[origin] = expiry
         
-        # 设置自动解开配置
         self.auto_wake_sleep_map[origin] = {
             "expiry": expiry,
             "auto_wake_threshold": threshold,
@@ -684,17 +692,14 @@ class SleepPlugin(Star):
         
         self._save_sleep_map()
 
-        # 保存 event 到映射
         self.origin_to_event_map[origin] = event
 
-        # 启动任务
         await self._ensure_update_task_started()
         await self._ensure_auto_wake_task_started()
 
-        # 更新群昵称
+        # 使用自判定休眠的群昵称模板
         if self.group_card_enabled:
-            remaining_minutes = max(1, int(duration_seconds / 60))
-            await self._update_group_card(event, origin, remaining_minutes)
+            await self._update_group_card(event, origin, duration_seconds, is_auto_sleep=True)
 
         expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry))
         logger.info(
@@ -703,13 +708,12 @@ class SleepPlugin(Star):
         )
 
         return (
-            f"已开始睡觉，原因: {reason}。"
-            f"最长睡觉 {max_duration} 分钟，"
-            f"当群消息少于 {threshold} 条/分钟时会自动起床。"
+            f"已开始静默，原因: {reason}。"
+            f"最长静默 {max_duration} 分钟，"
+            f"当群消息少于 {threshold} 条/分钟时会自动醒来。"
         )
 
     async def terminate(self):
-        # 停止任务
         for task in [self._update_task, self._auto_wake_task]:
             if task and not task.done():
                 task.cancel()
@@ -718,11 +722,10 @@ class SleepPlugin(Star):
                 except asyncio.CancelledError:
                     pass
 
-        # 恢复群昵称
         if self.group_card_enabled and self.original_group_cards:
             for origin in list(self.original_group_cards.keys()):
                 event = self.origin_to_event_map.get(origin)
                 if event:
-                    await self._update_group_card(event, origin, 0)
+                    await self._update_group_card(event, origin, 0, False)
 
         logger.info("[Sleep] 已卸载插件")

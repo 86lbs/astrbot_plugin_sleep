@@ -33,7 +33,7 @@
         "description": "默认睡觉时长（秒）",
         "type": "int",
         "default": 600,
-        "hint": "不指定时长时的默认睡觉时间，范围 0-86400 秒（0-24小时）"
+        "hint": "不指定时长时的默认睡觉时间，范围 0-43200 秒（0-12小时）"
     },
     "sleep_reply": {
         "description": "睡觉回复语",
@@ -90,10 +90,16 @@
         "hint": "睡觉时更新群昵称显示剩余时间（仅支持 QQ）"
     },
     "group_card_template": {
-        "description": "群昵称模板",
+        "description": "群昵称模板（指令触发）",
         "type": "string",
-        "default": "{original_name}[睡觉中 {remaining}分钟]",
-        "hint": "支持变量: {original_name}(原始昵称), {original_card}(原始群名片), {original_nickname}(原始QQ昵称), {remaining}(剩余分钟)"
+        "default": "{original_name}[睡觉中 {remaining}]",
+        "hint": "指令触发的睡觉使用的模板。支持变量: {original_name}, {original_card}, {original_nickname}, {remaining}(剩余时间), {remaining_seconds}(剩余秒数)"
+    },
+    "group_card_template_auto": {
+        "description": "群昵称模板（自判定休眠）",
+        "type": "string",
+        "default": "{original_name}[静默中 {remaining}]",
+        "hint": "LLM自判定休眠时使用的模板。支持变量同上"
     },
     "priority": {
         "description": "插件优先级",
