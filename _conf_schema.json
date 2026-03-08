@@ -14,7 +14,7 @@
   "default_duration": {
     "type": "int",
     "description": "默认睡觉时长(秒)",
-    "hint": "范围0-86400秒",
+    "hint": "范围0-43200秒",
     "default": 600
   },
   "sleep_reply": {
@@ -68,7 +68,7 @@
     "type": "bool",
     "description": "启用 LLM 工具调用",
     "hint": "开启后，LLM 可以主动调用睡觉/起床功能",
-    "default": false
+    "default": true
   },
   "require_admin": {
     "type": "bool",
