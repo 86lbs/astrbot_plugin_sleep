@@ -33,7 +33,7 @@
         "description": "默认睡觉时长（秒）",
         "type": "int",
         "default": 600,
-        "hint": "不指定时长时的默认睡觉时间，范围 0-43200 秒（0-12小时）"
+        "hint": "不指定时长时的默认睡觉时间，范围 1-43200 秒（最长12小时）"
     },
     "sleep_reply": {
         "description": "睡觉回复语",
@@ -45,7 +45,7 @@
         "description": "起床回复语",
         "type": "string",
         "default": "早安~我醒来了☀️",
-        "hint": "支持变量: {duration}(已睡觉时长秒), {expiry_time}(当前时间)"
+        "hint": "支持变量: {duration}(已睡觉时长秒)"
     },
     "llm_tool_enabled": {
         "description": "启用 LLM 工具",
@@ -75,7 +75,7 @@
         "description": "刷屏检测阈值",
         "type": "int",
         "default": 10,
-        "hint": "每分钟消息数阈值，用于刷屏检测"
+        "hint": "时间窗口内的消息数阈值，用于刷屏检测"
     },
     "spam_window": {
         "description": "刷屏检测窗口（秒）",
