@@ -207,43 +207,18 @@ class SleepPlugin(Star):
         if not self.require_admin:
             return True
 
-        # 获取管理员列表 - 修复：正确获取 AstrBot 配置中的管理员列表
+        # 获取管理员列表 - 根据 AstrBot 官方源码，字段名是 admins_id
         try:
-            # 方法1：从 context 获取配置
+            # 从 context 获取 AstrBot 配置
             astrbot_config = self.context.get_config()
             
-            # 尝试多种可能的配置路径
-            admins = None
-            
-            # 尝试直接获取 admins 字段
+            # 根据官方源码 default.py，管理员字段名是 admins_id
+            admins = []
             if hasattr(astrbot_config, 'get'):
-                admins = astrbot_config.get("admins", None)
+                admins = astrbot_config.get("admins_id", [])
+            elif isinstance(astrbot_config, dict):
+                admins = astrbot_config.get("admins_id", [])
             
-            # 如果没有找到，尝试从 admin_users 字段获取
-            if admins is None and hasattr(astrbot_config, 'get'):
-                admins = astrbot_config.get("admin_users", None)
-            
-            # 如果还是没有，尝试从配置字典中获取
-            if admins is None and isinstance(astrbot_config, dict):
-                admins = astrbot_config.get("admins", astrbot_config.get("admin_users", []))
-            
-            # 最后尝试从 context 的内部配置获取
-            if admins is None:
-                try:
-                    # 尝试访问内部配置
-                    if hasattr(self.context, '_config'):
-                        inner_config = self.context._config
-                        if hasattr(inner_config, 'get'):
-                            admins = inner_config.get("admins", inner_config.get("admin_users", []))
-                        elif isinstance(inner_config, dict):
-                            admins = inner_config.get("admins", inner_config.get("admin_users", []))
-                except Exception:
-                    pass
-            
-            # 如果所有方法都失败，使用空列表
-            if admins is None:
-                admins = []
-                
             sender_id = event.get_sender_id()
             
             # 检查发送者是否在管理员列表中
@@ -251,6 +226,8 @@ class SleepPlugin(Star):
             
             if not is_admin:
                 logger.debug(f"[Sleep] 用户 {sender_id} 不在管理员列表中: {admins}")
+            else:
+                logger.debug(f"[Sleep] 用户 {sender_id} 是管理员")
             
             return is_admin
             

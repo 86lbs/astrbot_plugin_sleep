@@ -1,6 +1,6 @@
 name: astrbot_plugin_sleep
 display_name: 睡觉
 desc: 让bot睡觉，支持指令调用和函数调用，支持定时"睡觉"，支持通过群昵称显示睡觉状态
-version: v1.0.0
+version: v1.0.1
 author: 86lbs
 repo: https://github.com/86lbs/astrbot_plugin_sleep
