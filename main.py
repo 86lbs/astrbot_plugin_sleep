@@ -392,23 +392,19 @@ class SleepPlugin(Star):
 
             # 检查管理员权限
             if not self._check_admin(event):
-                event.set_result(
-                    event.create_result()
-                    .message("⚠️ 只有管理员才能使用此指令")
-                    .use_t2i(False)
-                )
+                yield event.plain_result("⚠️ 只有管理员才能使用此指令")
                 event.stop_event()
                 return
 
             if is_sleep_cmd:
                 result = await self._handle_sleep_command(event, text, origin)
-                event.set_result(event.create_result().message(result).use_t2i(False))
+                yield event.plain_result(result)
                 event.stop_event()
                 return
 
             if is_wake_cmd:
                 result = await self._handle_wake_command(event, origin)
-                event.set_result(event.create_result().message(result).use_t2i(False))
+                yield event.plain_result(result)
                 event.stop_event()
                 return
 
