@@ -30,6 +30,8 @@
 - `h` - 小时
 - `d` - 天
 
+**注意**：如果不指定单位，默认使用分钟。例如 `睡觉 10` 表示睡觉 10 分钟。
+
 ### 配置项
 
 | 配置项 | 类型 | 默认值 | 说明 |
@@ -40,13 +42,18 @@
 | `sleep_reply` | string | "好的，我去睡觉了~💤" | 睡觉时的回复 |
 | `wake_reply` | string | "早安~我醒来了☀️" | 起床时的回复 |
 | `require_prefix` | bool | false | 是否需要命令前缀 |
+| `sleep_require_admin` | bool | false | 睡觉需要管理员权限 |
+| `wake_require_admin` | bool | false | 起床需要管理员权限 |
 | `priority` | int | 10000 | 插件优先级 |
 | `scheduled_sleep_enabled` | bool | false | 启用定时睡觉 |
 | `scheduled_sleep_times` | text | "23:00-07:00" | 定时睡觉时间段 |
+| `spam_detect_enabled` | bool | false | 启用刷屏检测 |
+| `spam_threshold` | int | 10 | 刷屏检测阈值 |
+| `spam_window` | int | 60 | 刷屏检测窗口(秒) |
 | `group_card_update_enabled` | bool | false | 启用群昵称显示 |
-| `group_card_template` | string | "{original_name}[睡觉中 {remaining}分钟]" | 群昵称模板 |
+| `group_card_template` | string | "{original_name}[睡觉中 {remaining}]" | 群昵称模板 |
+| `group_card_template_auto` | string | "{original_name}[静默中 {remaining}]" | 自判定休眠模板 |
 | `llm_tool_enabled` | bool | true | 启用 LLM 工具调用 |
-| `require_admin` | bool | false | 需要管理员权限 |
 
 ## LLM 工具
 
@@ -71,7 +78,16 @@
 
 ## 更新日志
 
-### v1.3.0
+查看 [CHANGELOG.md](./CHANGELOG.md) 获取完整的更新历史。
+
+### v1.3.1 (2025-03-09)
+- **修复**：默认时间单位错误（秒→分钟）
+- **修复**：自动起床通知发送失败
+- **修复**：起床时长计算错误
+- **优化**：添加异步锁保护并发访问
+- **优化**：配置文件字段一致性
+
+### v1.3.0 (2025-03-08)
 - 修复：LLM tool 调用失败的问题
 - 优化：参数类型转换和验证
 - 优化：代码结构，提取公共方法
@@ -79,7 +95,7 @@
 - 优化：配置文件一致性
 - 添加：详细的代码注释
 
-### v1.0.0
+### v1.0.0 (2025-03-01)
 - 基于 astrbot_plugin_shutup 重构
 - 修复：睡觉结束后群昵称未恢复的问题
 - 修复：管理员权限识别问题
