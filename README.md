@@ -47,6 +47,16 @@ git clone https://github.com/86lbs/astrbot_plugin_sleep.git
 |--------|--------|------|
 | `lock_secret` | `astrbot_sleep_secret` | 用于生成解锁码的密钥，**请修改为随机字符串** |
 | `unlock_code_input` | (空) | 输入解锁码后保存，解锁成功后自动清空 |
+| `clear_lock_on_startup` | `true` | 启动时清空锁定记录（兜底机制） |
+
+### 兜底解锁机制
+
+为防止意外情况导致永久锁定，插件提供以下兜底机制：
+
+1. **重启自动解锁**：AstrBot 重启时自动清空所有锁定记录
+2. **退出自动解锁**：插件卸载/退出时自动清空所有锁定记录
+
+可通过 `clear_lock_on_startup: false` 禁用此功能。
 
 ### 刷屏检测配置
 

@@ -83,6 +83,12 @@
         "default": "",
         "hint": "输入解锁码后保存配置，再由管理员发送解锁指令。解锁后会自动清空"
     },
+    "clear_lock_on_startup": {
+        "description": "启动时清空锁定记录",
+        "type": "bool",
+        "default": true,
+        "hint": "启用后，AstrBot 重启时会自动清空所有敏感锁定记录（兜底机制）"
+    },
     "scheduled_sleep_enabled": {
         "description": "启用定时睡觉",
         "type": "bool",

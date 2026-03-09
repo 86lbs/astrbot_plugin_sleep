@@ -40,6 +40,7 @@ class SleepPlugin(Star):
         # 敏感锁定配置
         self.lock_secret = config.get("lock_secret", "astrbot_sleep_secret")
         self.unlock_code_input = config.get("unlock_code_input", "")  # 用户输入的解锁码
+        self.clear_lock_on_startup = config.get("clear_lock_on_startup", True)  # 启动时清空锁定记录
         
         # 支持字符串配置，转换为列表
         if isinstance(self.sleep_cmds, str):
@@ -242,7 +243,13 @@ class SleepPlugin(Star):
             if self.locked_path.exists():
                 with open(self.locked_path, "r", encoding="utf-8") as f:
                     self.locked_origins = json.load(f)
-                if self.locked_origins:
+                    
+                # 兜底：启动时清空锁定记录（可配置）
+                if self.clear_lock_on_startup and self.locked_origins:
+                    logger.info(f"[Sleep] 🔄 启动时清空 {len(self.locked_origins)} 条敏感锁定记录（兜底机制）")
+                    self.locked_origins = {}
+                    self._save_locked_map()
+                elif self.locked_origins:
                     logger.info(f"[Sleep] 加载了 {len(self.locked_origins)} 条敏感锁定记录")
         except Exception as e:
             logger.warning(f"[Sleep] ⚠️ 加载敏感锁定记录失败: {e}")
@@ -911,10 +918,17 @@ class SleepPlugin(Star):
                 except asyncio.CancelledError:
                     pass
 
+        # 恢复群昵称
         if self.group_card_enabled and self.original_group_cards:
             for origin in list(self.original_group_cards.keys()):
                 event = self.origin_to_event_map.get(origin)
                 if event:
                     await self._update_group_card(event, origin, 0, False, False)
+
+        # 兜底：退出时清空锁定记录
+        if self.locked_origins:
+            logger.info(f"[Sleep] 🔄 退出时清空 {len(self.locked_origins)} 条敏感锁定记录（兜底机制）")
+            self.locked_origins = {}
+            self._save_locked_map()
 
         logger.info("[Sleep] 已卸载插件")
