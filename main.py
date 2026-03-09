@@ -261,8 +261,12 @@ class SleepPlugin(Star):
                     self._save_locked_map()
                 elif self.locked_origins:
                     logger.info(f"[Sleep] 加载了 {len(self.locked_origins)} 条敏感锁定记录")
+                    logger.warning(f"[Sleep] ⚠️ 检测到锁定记录！如需清空，请设置 clear_lock_on_startup=true 并重启，或手动删除 {self.locked_path}")
         except Exception as e:
             logger.warning(f"[Sleep] ⚠️ 加载敏感锁定记录失败: {e}")
+            # 出错时清空锁定记录，防止卡死
+            self.locked_origins = {}
+            self._save_locked_map()
 
     def _save_sleep_map(self):
         try:
@@ -615,6 +619,22 @@ class SleepPlugin(Star):
                 else:
                     yield event.plain_result("⚠️ 解锁码错误，请检查配置文件中的解锁码")
                 
+                event.stop_event()
+                return
+            
+            # 紧急解锁：管理员发送特定指令强制解锁（兜底）
+            if text == "强制解锁" and self._check_admin(event):
+                lock_info = self.locked_origins.pop(origin, {})
+                self._save_locked_map()
+                
+                # 恢复群昵称
+                if self.group_card_enabled:
+                    await self._update_group_card(event, origin, 0, False, False)
+                    self.original_group_cards.pop(origin, None)
+                    self.original_nicknames.pop(origin, None)
+                
+                logger.info(f"[Sleep] 🔓 管理员强制解锁 | 来源: {origin}")
+                yield event.plain_result("🔓 已强制解锁，已恢复正常状态")
                 event.stop_event()
                 return
             
