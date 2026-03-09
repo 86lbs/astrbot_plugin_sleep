@@ -42,6 +42,16 @@ class SleepPlugin(Star):
         self.unlock_code_input = config.get("unlock_code_input", "")  # 用户输入的解锁码
         self.clear_lock_on_startup = config.get("clear_lock_on_startup", True)  # 启动时清空锁定记录
         
+        # 锁定提示模板
+        self.lock_reply_template = config.get(
+            "lock_reply_template",
+            "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n请在后台配置文件中输入解锁码 {unlock_code} 并保存后，由管理员发送「{unlock_command}」指令解锁。"
+        )
+        self.locked_reply_template = config.get(
+            "locked_reply_template",
+            "🔒 当前群已被锁定\n原因: {reason}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令"
+        )
+        
         # 支持字符串配置，转换为列表
         if isinstance(self.sleep_cmds, str):
             self.sleep_cmds = re.split(r"[\s,]+", self.sleep_cmds)
@@ -610,8 +620,19 @@ class SleepPlugin(Star):
             
             # 其他消息一律拦截
             lock_info = self.locked_origins.get(origin, {})
-            unlock_code = lock_info.get("unlock_code", "??????")
-            yield event.plain_result(f"🔒 当前群已被锁定\n原因: {lock_info.get('reason', '敏感内容')}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令")
+            lock_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(lock_info.get("lock_time", 0)))
+            try:
+                reply = self.locked_reply_template.format(
+                    reason=lock_info.get("reason", "敏感内容"),
+                    lock_time=lock_time,
+                    unlock_code=lock_info.get("unlock_code", "??????"),
+                    unlock_command=self.unlock_cmd,
+                    group_id=lock_info.get("group_id", "未知"),
+                )
+            except KeyError as e:
+                logger.warning(f"[Sleep] 锁定提示模板占位符错误: {e}")
+                reply = f"🔒 当前群已被锁定\n原因: {lock_info.get('reason', '敏感内容')}"
+            yield event.plain_result(reply)
             event.should_call_llm(False)
             event.stop_event()
             return
@@ -901,13 +922,22 @@ class SleepPlugin(Star):
             f"[Sleep] 🔒 LLM 敏感锁定 | 原因: {reason} | 群号: {group_id} | 解锁码: {unlock_code}"
         )
 
-        return (
-            f"🔒 已锁定当前群\n"
-            f"原因: {reason}\n"
-            f"锁定时间: {lock_time}\n\n"
-            f"请在后台配置文件中输入解锁码 {unlock_code} 并保存后，"
-            f"由管理员发送「{self.unlock_cmd}」指令解锁。"
-        )
+        try:
+            return self.lock_reply_template.format(
+                reason=reason,
+                lock_time=lock_time,
+                unlock_code=unlock_code,
+                unlock_command=self.unlock_cmd,
+                group_id=str(group_id),
+            )
+        except KeyError as e:
+            logger.warning(f"[Sleep] 锁定提示模板占位符错误: {e}")
+            return (
+                f"🔒 已锁定当前群\n"
+                f"原因: {reason}\n"
+                f"锁定时间: {lock_time}\n\n"
+                f"解锁码: {unlock_code}"
+            )
 
     async def terminate(self):
         for task in [self._update_task, self._auto_wake_task]:

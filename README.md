@@ -58,6 +58,29 @@ git clone https://github.com/86lbs/astrbot_plugin_sleep.git
 
 可通过 `clear_lock_on_startup: false` 禁用此功能。
 
+### 锁定提示模板
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `lock_reply_template` | 见下方 | 触发锁定时的提示 |
+| `locked_reply_template` | 见下方 | 锁定后发送消息时的提示 |
+
+**支持的变量：**
+- `{reason}` - 锁定原因
+- `{lock_time}` - 锁定时间
+- `{unlock_code}` - 解锁码
+- `{unlock_command}` - 解锁指令
+- `{group_id}` - 群号
+
+**默认模板示例：**
+```
+🔒 当前群已被锁定
+原因: {reason}
+锁定时间: {lock_time}
+
+请在后台配置文件中输入解锁码 {unlock_code} 并保存后，由管理员发送「{unlock_command}」指令解锁。
+```
+
 ### 刷屏检测配置
 
 | 配置项 | 默认值 | 说明 |
