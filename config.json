@@ -11,6 +11,12 @@
         "default": "起床,醒来,wake",
         "hint": "触发起床的指令，多个用逗号分隔"
     },
+    "unlock_command": {
+        "description": "解锁指令",
+        "type": "string",
+        "default": "解锁",
+        "hint": "敏感锁定后的解锁指令"
+    },
     "require_prefix": {
         "description": "是否需要前缀触发",
         "type": "bool",
@@ -65,6 +71,18 @@
         "default": true,
         "hint": "允许 LLM 调用睡觉工具"
     },
+    "lock_secret": {
+        "description": "敏感锁定密钥",
+        "type": "string",
+        "default": "astrbot_sleep_secret",
+        "hint": "用于生成解锁码的密钥，请修改为随机字符串以提高安全性"
+    },
+    "unlock_code_input": {
+        "description": "解锁码输入",
+        "type": "string",
+        "default": "",
+        "hint": "输入解锁码后保存配置，再由管理员发送解锁指令。解锁后会自动清空"
+    },
     "scheduled_sleep_enabled": {
         "description": "启用定时睡觉",
         "type": "bool",
@@ -118,6 +136,12 @@
         "type": "string",
         "default": "{original_name}[静默中 {remaining}]",
         "hint": "LLM自判定休眠时使用的模板。支持变量同上"
+    },
+    "group_card_template_locked": {
+        "description": "群昵称模板（敏感锁定）",
+        "type": "string",
+        "default": "{original_name}[已锁定]",
+        "hint": "敏感锁定时使用的模板。支持变量: {original_name}, {original_card}, {original_nickname}"
     },
     "priority": {
         "description": "插件优先级",

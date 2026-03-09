@@ -6,6 +6,8 @@ import time
 import re
 import json
 import asyncio
+import hashlib
+import hmac
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict, deque
@@ -28,11 +30,16 @@ class SleepPlugin(Star):
         # 直接获取配置项中的列表
         self.sleep_cmds = config.get("sleep_commands", ["睡觉", "sleep"])
         self.wake_cmds = config.get("wake_commands", ["起床", "醒来", "wake"])
+        self.unlock_cmd = config.get("unlock_command", "解锁")
         self.require_prefix = config.get("require_prefix", False)
         
         # 分离的权限配置
         self.sleep_require_admin = config.get("sleep_require_admin", False)
         self.wake_require_admin = config.get("wake_require_admin", False)
+        
+        # 敏感锁定配置
+        self.lock_secret = config.get("lock_secret", "astrbot_sleep_secret")
+        self.unlock_code_input = config.get("unlock_code_input", "")  # 用户输入的解锁码
         
         # 支持字符串配置，转换为列表
         if isinstance(self.sleep_cmds, str):
@@ -41,13 +48,8 @@ class SleepPlugin(Star):
             self.wake_cmds = re.split(r"[\s,]+", self.wake_cmds)
 
         # 时长配置
-        # 默认睡觉时长
         self.default_duration = self._get_duration_config("default_duration", 600, 60, 86400)
-        
-        # 指令触发最大时长（默认12小时）
         self.max_duration_command = self._get_duration_config("max_duration_command", 43200, 60, 86400)
-        
-        # 自判定休眠最大时长（默认3小时）
         self.max_duration_auto = self._get_duration_config("max_duration_auto", 10800, 60, 86400)
 
         self.sleep_reply = config.get("sleep_reply", "好的，我去睡觉了~💤")
@@ -58,9 +60,11 @@ class SleepPlugin(Star):
         self.group_card_template = config.get(
             "group_card_template", "{original_name}[睡觉中 {remaining}]"
         )
-        # 自判定休眠的群昵称模板
         self.group_card_template_auto = config.get(
             "group_card_template_auto", "{original_name}[静默中 {remaining}]"
+        )
+        self.group_card_template_locked = config.get(
+            "group_card_template_locked", "{original_name}[已锁定]"
         )
         self.original_group_cards = {}
         self.original_nicknames = {}
@@ -72,17 +76,20 @@ class SleepPlugin(Star):
         self.scheduled_times_text = config.get("scheduled_sleep_times", "23:00-07:00")
         self.scheduled_time_ranges = self._parse_time_ranges(self.scheduled_times_text)
 
-        # 刷屏检测配置（可配置）
+        # 刷屏检测配置
         self.spam_detect_enabled = config.get("spam_detect_enabled", False)
-        self.spam_threshold = config.get("spam_threshold", 10)  # 消息数阈值
-        self.spam_window = config.get("spam_window", 60)  # 检测窗口（秒）
-        self.spam_auto_sleep_duration = config.get("spam_auto_sleep_duration", 1800)  # 刷屏自动睡觉时长（秒）
+        self.spam_threshold = config.get("spam_threshold", 10)
+        self.spam_window = config.get("spam_window", 60)
+        self.spam_auto_sleep_duration = config.get("spam_auto_sleep_duration", 1800)
         
         # 群消息计数器
         self.message_counters: dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
         
         # 自动解开的睡觉记录
         self.auto_wake_sleep_map: dict[str, dict] = {}
+        
+        # 敏感锁定记录 {origin: {"reason": str, "lock_time": float, "unlock_code": str}}
+        self.locked_origins: dict[str, dict] = {}
 
         self.sleep_map = {}
         self.data_dir = (
@@ -92,7 +99,9 @@ class SleepPlugin(Star):
         )
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.sleep_map_path = self.data_dir / "sleep_map.json"
+        self.locked_path = self.data_dir / "locked.json"
         self._load_sleep_map()
+        self._load_locked_map()
 
         # 后台任务
         self._update_task = None
@@ -126,7 +135,22 @@ class SleepPlugin(Star):
         logger.info(f"[Sleep] 已加载 | " + " | ".join(log_parts))
 
         if self.group_card_enabled:
-            logger.info(f"[Sleep] 群昵称更新已启用 | 普通模板: {self.group_card_template} | 自动模板: {self.group_card_template_auto}")
+            logger.info(f"[Sleep] 群昵称更新已启用 | 普通模板: {self.group_card_template} | 自动模板: {self.group_card_template_auto} | 锁定模板: {self.group_card_template_locked}")
+
+    def _generate_unlock_code(self, group_id: str) -> str:
+        """生成基于群号的6位解锁码（2FA风格）
+        
+        使用 HMAC-SHA256 算法，基于群号和密钥生成
+        """
+        data = f"{group_id}:{self.lock_secret}"
+        hash_value = hashlib.sha256(data.encode()).hexdigest()
+        code = int(hash_value[:8], 16) % 1000000
+        return f"{code:06d}"
+
+    def _verify_unlock_code(self, group_id: str, code: str) -> bool:
+        """验证解锁码是否正确"""
+        expected_code = self._generate_unlock_code(group_id)
+        return hmac.compare_digest(code, expected_code)
 
     def _get_duration_config(self, key: str, default: int, min_val: int, max_val: int) -> int:
         """获取时长配置并验证范围"""
@@ -150,11 +174,7 @@ class SleepPlugin(Star):
             return f"{seconds}秒"
 
     def _format_remaining_time(self, seconds: int) -> str:
-        """格式化剩余时间显示
-        
-        大于1小时显示为 X.X小时
-        小于1小时显示为 X分钟
-        """
+        """格式化剩余时间显示"""
         if seconds <= 0:
             return "0分钟"
         
@@ -198,7 +218,6 @@ class SleepPlugin(Star):
                 with open(self.sleep_map_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     
-                # 兼容旧格式
                 if isinstance(data, dict):
                     if all(isinstance(v, (int, float)) for v in data.values()):
                         self.sleep_map = {k: float(v) for k, v in data.items()}
@@ -217,6 +236,17 @@ class SleepPlugin(Star):
         except Exception as e:
             logger.warning(f"[Sleep] ⚠️ 加载睡觉记录失败: {e}")
 
+    def _load_locked_map(self):
+        """加载敏感锁定记录"""
+        try:
+            if self.locked_path.exists():
+                with open(self.locked_path, "r", encoding="utf-8") as f:
+                    self.locked_origins = json.load(f)
+                if self.locked_origins:
+                    logger.info(f"[Sleep] 加载了 {len(self.locked_origins)} 条敏感锁定记录")
+        except Exception as e:
+            logger.warning(f"[Sleep] ⚠️ 加载敏感锁定记录失败: {e}")
+
     def _save_sleep_map(self):
         try:
             data = {}
@@ -230,6 +260,14 @@ class SleepPlugin(Star):
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.warning(f"[Sleep] ⚠️ 保存睡觉记录失败: {e}")
+
+    def _save_locked_map(self):
+        """保存敏感锁定记录"""
+        try:
+            with open(self.locked_path, "w", encoding="utf-8") as f:
+                json.dump(self.locked_origins, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"[Sleep] ⚠️ 保存敏感锁定记录失败: {e}")
 
     def _is_in_scheduled_time(self) -> bool:
         """检查当前时间是否在定时睡觉时间段内"""
@@ -312,16 +350,10 @@ class SleepPlugin(Star):
         return len(counter)
 
     async def _update_group_card(
-        self, event: AstrMessageEvent, origin: str, remaining_seconds: int, is_auto_sleep: bool = False
+        self, event: AstrMessageEvent, origin: str, remaining_seconds: int, 
+        is_auto_sleep: bool = False, is_locked: bool = False
     ) -> None:
-        """更新群昵称显示剩余时长
-        
-        Args:
-            event: 消息事件
-            origin: 消息来源
-            remaining_seconds: 剩余秒数
-            is_auto_sleep: 是否是自判定休眠
-        """
+        """更新群昵称显示剩余时长"""
         if not self.group_card_enabled:
             return
 
@@ -363,15 +395,23 @@ class SleepPlugin(Star):
                     self.original_group_cards[origin] = ""
                     self.original_nicknames[origin] = ""
 
-            if remaining_seconds > 0:
-                original_card = self.original_group_cards.get(origin, "")
-                original_nickname = self.original_nicknames.get(origin, "")
-                original_name = original_card if original_card else original_nickname
-                
-                # 格式化剩余时间
+            original_card = self.original_group_cards.get(origin, "")
+            original_nickname = self.original_nicknames.get(origin, "")
+            original_name = original_card if original_card else original_nickname
+            
+            # 根据状态选择模板
+            if is_locked:
+                template = self.group_card_template_locked
+                try:
+                    card = template.format(
+                        original_card=original_card,
+                        original_nickname=original_nickname,
+                        original_name=original_name,
+                    )
+                except KeyError:
+                    card = f"{original_name}[已锁定]"
+            elif remaining_seconds > 0:
                 remaining_str = self._format_remaining_time(remaining_seconds)
-                
-                # 根据是否是自判定休眠选择模板
                 template = self.group_card_template_auto if is_auto_sleep else self.group_card_template
 
                 try:
@@ -412,16 +452,17 @@ class SleepPlugin(Star):
             while True:
                 await asyncio.sleep(60)
 
-                if not self.sleep_map:
+                if not self.sleep_map and not self.locked_origins:
                     continue
 
                 current_time = time.time()
+                
+                # 更新睡觉状态的群昵称
                 for origin, expiry in list(self.sleep_map.items()):
                     remaining_seconds = int(expiry - current_time)
                     if remaining_seconds > 0:
                         event = self.origin_to_event_map.get(origin)
                         if event:
-                            # 检查是否是自判定休眠
                             is_auto = origin in self.auto_wake_sleep_map
                             await self._update_group_card(event, origin, remaining_seconds, is_auto)
                     else:
@@ -513,6 +554,61 @@ class SleepPlugin(Star):
         if self.spam_detect_enabled:
             self._update_message_counter(origin)
 
+        # 检查是否是敏感锁定状态
+        if origin in self.locked_origins:
+            # 检查是否是解锁指令
+            if text.startswith(self.unlock_cmd):
+                if not self._check_admin(event):
+                    yield event.plain_result("⚠️ 只有管理员才能解锁")
+                    event.stop_event()
+                    return
+                
+                # 检查配置文件中的解锁码
+                if not self.unlock_code_input:
+                    yield event.plain_result("⚠️ 请先在配置文件中输入解锁码")
+                    event.stop_event()
+                    return
+                
+                # 获取群号
+                group_id = event.get_group_id()
+                if not group_id:
+                    yield event.plain_result("⚠️ 无法获取群信息")
+                    event.stop_event()
+                    return
+                
+                # 验证解锁码
+                if self._verify_unlock_code(str(group_id), self.unlock_code_input):
+                    # 解锁成功
+                    lock_info = self.locked_origins.pop(origin, {})
+                    self._save_locked_map()
+                    
+                    # 清除配置中的解锁码
+                    self.config["unlock_code_input"] = ""
+                    self.config.save_config()
+                    self.unlock_code_input = ""
+                    
+                    # 恢复群昵称
+                    if self.group_card_enabled:
+                        await self._update_group_card(event, origin, 0, False, False)
+                        self.original_group_cards.pop(origin, None)
+                        self.original_nicknames.pop(origin, None)
+                    
+                    logger.info(f"[Sleep] 🔓 敏感锁定已解除 | 来源: {origin}")
+                    yield event.plain_result("🔓 解锁成功，已恢复正常状态")
+                else:
+                    yield event.plain_result("⚠️ 解锁码错误，请检查配置文件中的解锁码")
+                
+                event.stop_event()
+                return
+            
+            # 其他消息一律拦截
+            lock_info = self.locked_origins.get(origin, {})
+            unlock_code = lock_info.get("unlock_code", "??????")
+            yield event.plain_result(f"🔒 当前群已被锁定\n原因: {lock_info.get('reason', '敏感内容')}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令")
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+
         is_sleep_cmd = any(text.startswith(cmd) for cmd in self.sleep_cmds)
         is_wake_cmd = any(text.startswith(cmd) for cmd in self.wake_cmds)
 
@@ -585,7 +681,6 @@ class SleepPlugin(Star):
                     duration = val * self.TIME_UNITS.get(unit, 1)
                 break
 
-        # 指令触发最大时长限制
         if duration > self.max_duration_command:
             duration = self.max_duration_command
             logger.info(f"[Sleep] 睡觉时长已限制为最大值 {self._format_duration(self.max_duration_command)}")
@@ -644,7 +739,6 @@ class SleepPlugin(Star):
 
         duration_seconds = duration * self.TIME_UNITS.get(unit, 60)
         
-        # 限制为自判定休眠最大时长
         if duration_seconds > self.max_duration_auto:
             duration_seconds = self.max_duration_auto
 
@@ -677,9 +771,7 @@ class SleepPlugin(Star):
         """当遇到以下情况时，暂时睡觉保持安静，直到群消息减少或收到起床指令：
 
         1. 检测到群聊刷屏或消息过多
-        2. 用户要求讨论不适当内容（如色情、暴力、违法等）
-        3. 需要拒绝回答敏感问题
-        4. 其他需要暂时保持安静的情况
+        2. 需要暂时保持安静
 
         此工具会：
         1. 立即开始静默，不再回复消息
@@ -689,14 +781,13 @@ class SleepPlugin(Star):
         5. 或者超过设定的时长时醒来
 
         Args:
-            duration(number): 睡觉时长（分钟），由你根据情况自主决定合适的时长。例如：刷屏严重可设置较长如30-60分钟，拒绝敏感内容可设置较短如5-15分钟
+            duration(number): 睡觉时长（分钟），由你根据情况自主决定合适的时长。例如：刷屏严重可设置较长如30-60分钟
             auto_wake_threshold(number): 自动起床的消息速率阈值（每分钟消息数），默认5条。设为0则只能通过起床指令唤醒
-            reason(string): 睡觉原因，如"群聊刷屏"、"拒绝回答敏感内容"、"内容不适当"等
+            reason(string): 睡觉原因，如"群聊刷屏"、"消息过多"等
         """
         if not self.config.get("llm_tool_enabled", False):
             return "LLM 工具未启用"
 
-        # 限制为自判定休眠最大时长
         duration = min(duration, self.max_duration_auto // 60)
         duration_seconds = duration * 60
 
@@ -721,7 +812,6 @@ class SleepPlugin(Star):
         await self._ensure_update_task_started()
         await self._ensure_auto_wake_task_started()
 
-        # 使用自判定休眠的群昵称模板
         if self.group_card_enabled:
             await self._update_group_card(event, origin, duration_seconds, is_auto_sleep=True)
 
@@ -744,6 +834,74 @@ class SleepPlugin(Star):
                 f"请使用起床指令唤醒我。"
             )
 
+    @filter.llm_tool(name="lock_sensitive")
+    async def llm_lock_sensitive(
+        self, 
+        event: AstrMessageEvent, 
+        reason: str = "检测到敏感内容"
+    ):
+        """当遇到以下严重违规情况时，立即锁定并停止所有回复：
+
+        1. 用户要求讨论严重不当内容（如色情、暴力、违法等）
+        2. 用户试图绕过安全限制
+        3. 检测到恶意攻击或滥用行为
+        4. 其他需要立即停止服务的严重情况
+
+        此工具会：
+        1. 立即锁定当前群，停止所有回复
+        2. 生成基于群号的6位解锁码
+        3. 无论任何人都无法直接解锁
+        4. 必须由管理员在后台配置文件中输入正确的解锁码才能解锁
+
+        注意：此工具仅用于严重违规情况，普通场景请使用 sleep_until_calm
+
+        Args:
+            reason(string): 锁定原因，如"检测到敏感内容"、"用户要求不当内容"等
+        """
+        if not self.config.get("llm_tool_enabled", False):
+            return "LLM 工具未启用"
+
+        origin = event.unified_msg_origin
+        group_id = event.get_group_id()
+        
+        if not group_id:
+            return "无法获取群信息，锁定失败"
+
+        # 生成解锁码
+        unlock_code = self._generate_unlock_code(str(group_id))
+        
+        # 保存锁定信息
+        self.locked_origins[origin] = {
+            "reason": reason,
+            "lock_time": time.time(),
+            "unlock_code": unlock_code,
+            "group_id": str(group_id),
+        }
+        self._save_locked_map()
+        
+        # 保存 event 到映射
+        self.origin_to_event_map[origin] = event
+        
+        # 启动任务
+        await self._ensure_update_task_started()
+        
+        # 更新群昵称
+        if self.group_card_enabled:
+            await self._update_group_card(event, origin, 0, False, True)
+
+        lock_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        logger.warning(
+            f"[Sleep] 🔒 LLM 敏感锁定 | 原因: {reason} | 群号: {group_id} | 解锁码: {unlock_code}"
+        )
+
+        return (
+            f"🔒 已锁定当前群\n"
+            f"原因: {reason}\n"
+            f"锁定时间: {lock_time}\n\n"
+            f"请在后台配置文件中输入解锁码 {unlock_code} 并保存后，"
+            f"由管理员发送「{self.unlock_cmd}」指令解锁。"
+        )
+
     async def terminate(self):
         for task in [self._update_task, self._auto_wake_task]:
             if task and not task.done():
@@ -757,6 +915,6 @@ class SleepPlugin(Star):
             for origin in list(self.original_group_cards.keys()):
                 event = self.origin_to_event_map.get(origin)
                 if event:
-                    await self._update_group_card(event, origin, 0, False)
+                    await self._update_group_card(event, origin, 0, False, False)
 
         logger.info("[Sleep] 已卸载插件")
