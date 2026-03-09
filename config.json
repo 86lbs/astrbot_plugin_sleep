@@ -33,7 +33,19 @@
         "description": "默认睡觉时长（秒）",
         "type": "int",
         "default": 600,
-        "hint": "不指定时长时的默认睡觉时间，范围 0-43200 秒（0-12小时）"
+        "hint": "不指定时长时的默认睡觉时间，范围 60-86400 秒"
+    },
+    "max_duration_command": {
+        "description": "指令触发最大时长（秒）",
+        "type": "int",
+        "default": 43200,
+        "hint": "通过指令触发的睡觉最大时长，默认12小时(43200秒)，范围 60-86400 秒"
+    },
+    "max_duration_auto": {
+        "description": "自判定休眠最大时长（秒）",
+        "type": "int",
+        "default": 10800,
+        "hint": "LLM自判定休眠的最大时长，默认3小时(10800秒)，范围 60-86400 秒"
     },
     "sleep_reply": {
         "description": "睡觉回复语",

@@ -40,19 +40,15 @@ class SleepPlugin(Star):
         if isinstance(self.wake_cmds, str):
             self.wake_cmds = re.split(r"[\s,]+", self.wake_cmds)
 
-        # 限制 default_duration 范围在 0-43200 秒(0-12小时)
-        duration_config = config.get("default_duration", 600)
-        if not isinstance(duration_config, (int, float)) or not (
-            0 <= duration_config <= 43200
-        ):
-            logger.warning(
-                f"[Sleep] ⚠️ default_duration 配置无效({duration_config})，使用默认值 600s"
-            )
-            self.default_duration = 600
-            config["default_duration"] = 600
-            config.save_config()
-        else:
-            self.default_duration = int(duration_config)
+        # 时长配置
+        # 默认睡觉时长
+        self.default_duration = self._get_duration_config("default_duration", 600, 0, 86400)
+        
+        # 指令触发最大时长（默认12小时）
+        self.max_duration_command = self._get_duration_config("max_duration_command", 43200, 60, 86400)
+        
+        # 自判定休眠最大时长（默认3小时）
+        self.max_duration_auto = self._get_duration_config("max_duration_auto", 10800, 60, 86400)
 
         self.sleep_reply = config.get("sleep_reply", "好的，我去睡觉了~💤")
         self.wake_reply = config.get("wake_reply", "早安~我醒来了☀️")
@@ -106,7 +102,9 @@ class SleepPlugin(Star):
         # 日志输出
         log_parts = [
             f"指令: {self.sleep_cmds} & {self.wake_cmds}",
-            f"默认时长: {self.default_duration}s",
+            f"默认时长: {self._format_duration(self.default_duration)}",
+            f"指令最大: {self._format_duration(self.max_duration_command)}",
+            f"自判定最大: {self._format_duration(self.max_duration_auto)}",
             f"优先级: {self.plugin_priority}",
         ]
         
@@ -128,6 +126,27 @@ class SleepPlugin(Star):
 
         if self.group_card_enabled:
             logger.info(f"[Sleep] 群昵称更新已启用 | 普通模板: {self.group_card_template} | 自动模板: {self.group_card_template_auto}")
+
+    def _get_duration_config(self, key: str, default: int, min_val: int, max_val: int) -> int:
+        """获取时长配置并验证范围"""
+        value = self.config.get(key, default)
+        if not isinstance(value, (int, float)) or not (min_val <= value <= max_val):
+            logger.warning(
+                f"[Sleep] ⚠️ {key} 配置无效({value})，使用默认值 {default}s"
+            )
+            self.config[key] = default
+            self.config.save_config()
+            return default
+        return int(value)
+
+    def _format_duration(self, seconds: int) -> str:
+        """格式化时长显示"""
+        if seconds >= 3600:
+            return f"{seconds / 3600:.1f}小时"
+        elif seconds >= 60:
+            return f"{seconds // 60}分钟"
+        else:
+            return f"{seconds}秒"
 
     def _format_remaining_time(self, seconds: int) -> str:
         """格式化剩余时间显示
@@ -565,11 +584,10 @@ class SleepPlugin(Star):
                     duration = val * self.TIME_UNITS.get(unit, 1)
                 break
 
-        # 指令触发最大时长限制为12小时
-        max_duration = 43200  # 12小时
-        if duration > max_duration:
-            duration = max_duration
-            logger.info(f"[Sleep] 睡觉时长已限制为最大值 12 小时")
+        # 指令触发最大时长限制
+        if duration > self.max_duration_command:
+            duration = self.max_duration_command
+            logger.info(f"[Sleep] 睡觉时长已限制为最大值 {self._format_duration(self.max_duration_command)}")
 
         self.sleep_map[origin] = time.time() + duration
         self._save_sleep_map()
@@ -617,16 +635,17 @@ class SleepPlugin(Star):
         """在指定时间内停止回复消息。当用户表达希望你暂时睡觉,保持安静,不要再说话时,可以调用此工具。
 
         Args:
-            duration(number): 睡觉时长数值，最长不超过 60 分钟
+            duration(number): 睡觉时长数值
             unit(string): 时间单位，可选值: s(秒), m(分钟), h(小时)。默认为 m(分钟)
         """
         if not self.config.get("llm_tool_enabled", False):
             return "LLM 工具未启用"
 
         duration_seconds = duration * self.TIME_UNITS.get(unit, 60)
-        max_duration = 3600  # 1小时
-        if duration_seconds > max_duration:
-            duration_seconds = max_duration
+        
+        # 限制为自判定休眠最大时长
+        if duration_seconds > self.max_duration_auto:
+            duration_seconds = self.max_duration_auto
 
         origin = event.unified_msg_origin
         self.sleep_map[origin] = time.time() + duration_seconds
@@ -637,14 +656,14 @@ class SleepPlugin(Star):
         await self._ensure_auto_wake_task_started()
 
         if self.group_card_enabled:
-            await self._update_group_card(event, origin, duration_seconds, is_auto_sleep=False)
+            await self._update_group_card(event, origin, duration_seconds, is_auto_sleep=True)
 
         expiry_time = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(self.sleep_map[origin])
         )
         logger.info(f"[Sleep] 😴 LLM 调用睡觉 | 时长: {duration_seconds}s")
 
-        return f"已设置睡觉 {int(duration_seconds/60)} 分钟，到期时间: {expiry_time}"
+        return f"已设置睡觉 {self._format_duration(duration_seconds)}，到期时间: {expiry_time}"
 
     @filter.llm_tool(name="sleep_until_calm")
     async def llm_sleep_until_calm(
@@ -654,29 +673,33 @@ class SleepPlugin(Star):
         auto_wake_threshold: int = 5,
         reason: str = "群聊消息过多"
     ):
-        """当检测到群聊刷屏或消息过多时，暂时睡觉保持安静，直到群消息减少或收到起床指令。
+        """当遇到以下情况时，暂时睡觉保持安静，直到群消息减少或收到起床指令：
+
+        1. 检测到群聊刷屏或消息过多
+        2. 用户要求讨论不适当内容（如色情、暴力、违法等）
+        3. 需要拒绝回答敏感问题
+        4. 其他需要暂时保持安静的情况
 
         此工具会：
-        1. 立即开始睡觉，不再回复消息
+        1. 立即开始静默，不再回复消息
         2. 持续监测群消息速率
-        3. 当群消息速率低于阈值时自动起床
-        4. 或者收到起床指令时起床
-        5. 或者超过最大时长时起床
+        3. 当群消息速率低于阈值时自动醒来
+        4. 或者收到起床指令时醒来
+        5. 或者超过最大时长时醒来
 
         Args:
-            max_duration(number): 最大睡觉时长（分钟），默认30分钟，最长3小时
-            auto_wake_threshold(number): 自动起床的消息速率阈值（每分钟消息数），默认5条
-            reason(string): 睡觉原因，如"群聊刷屏"、"消息过多"等
+            max_duration(number): 最大睡觉时长（分钟），默认30分钟
+            auto_wake_threshold(number): 自动起床的消息速率阈值（每分钟消息数），默认5条，设为0则不自动起床
+            reason(string): 睡觉原因，如"群聊刷屏"、"拒绝回答敏感内容"、"内容不适当"等
         """
         if not self.config.get("llm_tool_enabled", False):
             return "LLM 工具未启用"
 
-        # 自判定休眠最大时长限制为3小时
-        max_allowed = 180  # 3小时
-        max_duration = min(max_duration, max_allowed)
+        # 限制为自判定休眠最大时长
+        max_duration = min(max_duration, self.max_duration_auto // 60)
         duration_seconds = max_duration * 60
 
-        threshold = auto_wake_threshold if auto_wake_threshold > 0 else self.spam_threshold
+        threshold = auto_wake_threshold if auto_wake_threshold >= 0 else self.spam_threshold
 
         origin = event.unified_msg_origin
         expiry = time.time() + duration_seconds
@@ -703,15 +726,22 @@ class SleepPlugin(Star):
 
         expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry))
         logger.info(
-            f"[Sleep] 😴 LLM 刷屏检测睡觉 | 原因: {reason} | "
+            f"[Sleep] 😴 LLM 自判定休眠 | 原因: {reason} | "
             f"最大时长: {max_duration}分钟 | 自动解开阈值: {threshold}条/分钟"
         )
 
-        return (
-            f"已开始静默，原因: {reason}。"
-            f"最长静默 {max_duration} 分钟，"
-            f"当群消息少于 {threshold} 条/分钟时会自动醒来。"
-        )
+        if threshold > 0:
+            return (
+                f"已开始静默，原因: {reason}。"
+                f"最长静默 {max_duration} 分钟，"
+                f"当群消息少于 {threshold} 条/分钟时会自动醒来。"
+            )
+        else:
+            return (
+                f"已开始静默，原因: {reason}。"
+                f"最长静默 {max_duration} 分钟，"
+                f"请使用起床指令唤醒我。"
+            )
 
     async def terminate(self):
         for task in [self._update_task, self._auto_wake_task]:
