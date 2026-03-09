@@ -42,7 +42,7 @@ class SleepPlugin(Star):
 
         # 时长配置
         # 默认睡觉时长
-        self.default_duration = self._get_duration_config("default_duration", 600, 0, 86400)
+        self.default_duration = self._get_duration_config("default_duration", 600, 60, 86400)
         
         # 指令触发最大时长（默认12小时）
         self.max_duration_command = self._get_duration_config("max_duration_command", 43200, 60, 86400)
@@ -72,10 +72,11 @@ class SleepPlugin(Star):
         self.scheduled_times_text = config.get("scheduled_sleep_times", "23:00-07:00")
         self.scheduled_time_ranges = self._parse_time_ranges(self.scheduled_times_text)
 
-        # 刷屏检测配置
+        # 刷屏检测配置（可配置）
         self.spam_detect_enabled = config.get("spam_detect_enabled", False)
-        self.spam_threshold = config.get("spam_threshold", 10)
-        self.spam_window = config.get("spam_window", 60)
+        self.spam_threshold = config.get("spam_threshold", 10)  # 消息数阈值
+        self.spam_window = config.get("spam_window", 60)  # 检测窗口（秒）
+        self.spam_auto_sleep_duration = config.get("spam_auto_sleep_duration", 1800)  # 刷屏自动睡觉时长（秒）
         
         # 群消息计数器
         self.message_counters: dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
@@ -120,7 +121,7 @@ class SleepPlugin(Star):
             log_parts.append(f"定时: {time_ranges_str}")
             
         if self.spam_detect_enabled:
-            log_parts.append(f"刷屏检测: 阈值{self.spam_threshold}条/{self.spam_window}s")
+            log_parts.append(f"刷屏检测: {self.spam_threshold}条/{self.spam_window}s → {self._format_duration(self.spam_auto_sleep_duration)}")
             
         logger.info(f"[Sleep] 已加载 | " + " | ".join(log_parts))
 
@@ -635,7 +636,7 @@ class SleepPlugin(Star):
         """在指定时间内停止回复消息。当用户表达希望你暂时睡觉,保持安静,不要再说话时,可以调用此工具。
 
         Args:
-            duration(number): 睡觉时长数值
+            duration(number): 睡觉时长数值，由你根据情况自主决定合适的时长
             unit(string): 时间单位，可选值: s(秒), m(分钟), h(小时)。默认为 m(分钟)
         """
         if not self.config.get("llm_tool_enabled", False):
@@ -669,7 +670,7 @@ class SleepPlugin(Star):
     async def llm_sleep_until_calm(
         self, 
         event: AstrMessageEvent, 
-        max_duration: int = 30,
+        duration: int = 30,
         auto_wake_threshold: int = 5,
         reason: str = "群聊消息过多"
     ):
@@ -685,19 +686,19 @@ class SleepPlugin(Star):
         2. 持续监测群消息速率
         3. 当群消息速率低于阈值时自动醒来
         4. 或者收到起床指令时醒来
-        5. 或者超过最大时长时醒来
+        5. 或者超过设定的时长时醒来
 
         Args:
-            max_duration(number): 最大睡觉时长（分钟），默认30分钟
-            auto_wake_threshold(number): 自动起床的消息速率阈值（每分钟消息数），默认5条，设为0则不自动起床
+            duration(number): 睡觉时长（分钟），由你根据情况自主决定合适的时长。例如：刷屏严重可设置较长如30-60分钟，拒绝敏感内容可设置较短如5-15分钟
+            auto_wake_threshold(number): 自动起床的消息速率阈值（每分钟消息数），默认5条。设为0则只能通过起床指令唤醒
             reason(string): 睡觉原因，如"群聊刷屏"、"拒绝回答敏感内容"、"内容不适当"等
         """
         if not self.config.get("llm_tool_enabled", False):
             return "LLM 工具未启用"
 
         # 限制为自判定休眠最大时长
-        max_duration = min(max_duration, self.max_duration_auto // 60)
-        duration_seconds = max_duration * 60
+        duration = min(duration, self.max_duration_auto // 60)
+        duration_seconds = duration * 60
 
         threshold = auto_wake_threshold if auto_wake_threshold >= 0 else self.spam_threshold
 
@@ -727,19 +728,19 @@ class SleepPlugin(Star):
         expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry))
         logger.info(
             f"[Sleep] 😴 LLM 自判定休眠 | 原因: {reason} | "
-            f"最大时长: {max_duration}分钟 | 自动解开阈值: {threshold}条/分钟"
+            f"时长: {duration}分钟 | 自动解开阈值: {threshold}条/分钟"
         )
 
         if threshold > 0:
             return (
                 f"已开始静默，原因: {reason}。"
-                f"最长静默 {max_duration} 分钟，"
+                f"静默 {duration} 分钟，"
                 f"当群消息少于 {threshold} 条/分钟时会自动醒来。"
             )
         else:
             return (
                 f"已开始静默，原因: {reason}。"
-                f"最长静默 {max_duration} 分钟，"
+                f"静默 {duration} 分钟，"
                 f"请使用起床指令唤醒我。"
             )
 

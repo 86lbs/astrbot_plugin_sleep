@@ -81,19 +81,25 @@
         "description": "启用刷屏检测",
         "type": "bool",
         "default": false,
-        "hint": "启用群消息计数功能，用于刷屏检测"
+        "hint": "启用群消息计数功能，用于刷屏检测和自动起床判断"
     },
     "spam_threshold": {
-        "description": "刷屏检测阈值",
+        "description": "刷屏判定阈值（消息数）",
         "type": "int",
         "default": 10,
-        "hint": "每分钟消息数阈值，用于刷屏检测"
+        "hint": "在检测窗口内超过此消息数则判定为刷屏"
     },
     "spam_window": {
         "description": "刷屏检测窗口（秒）",
         "type": "int",
         "default": 60,
-        "hint": "消息计数的时间窗口"
+        "hint": "消息计数的时间窗口，默认60秒"
+    },
+    "spam_auto_sleep_duration": {
+        "description": "刷屏自动睡觉时长（秒）",
+        "type": "int",
+        "default": 1800,
+        "hint": "检测到刷屏后自动睡觉的时长，默认30分钟(1800秒)"
     },
     "group_card_update_enabled": {
         "description": "启用群昵称更新",
