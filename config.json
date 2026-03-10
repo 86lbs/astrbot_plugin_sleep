@@ -89,17 +89,23 @@
         "default": true,
         "hint": "启用后，AstrBot 重启时会自动清空所有敏感锁定记录（兜底机制）"
     },
+    "unlock_code_interval": {
+        "description": "解锁码有效期（秒）",
+        "type": "int",
+        "default": 60,
+        "hint": "解锁码的有效时间，超过此时间后解锁码会变化。设为0则解锁码不会变化"
+    },
     "lock_reply_template": {
         "description": "锁定时的提示模板",
         "type": "string",
-        "default": "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n请在后台配置文件中输入解锁码 {unlock_code} 并保存后，由管理员发送「{unlock_command}」指令解锁。",
-        "hint": "触发锁定时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}"
+        "default": "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n解锁码: {unlock_code}\n（有效期 {unlock_code_interval} 秒）\n\n请在后台配置文件中输入解锁码并保存后，由管理员发送「{unlock_command}」指令解锁。",
+        "hint": "触发锁定时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}, {unlock_code_interval}"
     },
     "locked_reply_template": {
         "description": "已锁定状态的提示模板",
         "type": "string",
-        "default": "🔒 当前群已被锁定\n原因: {reason}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令",
-        "hint": "锁定后发送消息时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}"
+        "default": "🔒 当前群已被锁定\n原因: {reason}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令\n（解锁码每 {unlock_code_interval} 秒变化一次）",
+        "hint": "锁定后发送消息时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}, {unlock_code_interval}"
     },
     "scheduled_sleep_enabled": {
         "description": "启用定时睡觉",

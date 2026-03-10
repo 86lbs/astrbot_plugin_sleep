@@ -41,15 +41,16 @@ class SleepPlugin(Star):
         self.lock_secret = config.get("lock_secret", "astrbot_sleep_secret")
         self.unlock_code_input = config.get("unlock_code_input", "")  # 用户输入的解锁码
         self.clear_lock_on_startup = config.get("clear_lock_on_startup", True)  # 启动时清空锁定记录
+        self.unlock_code_interval = config.get("unlock_code_interval", 60)  # 解锁码有效期（秒）
         
         # 锁定提示模板
         self.lock_reply_template = config.get(
             "lock_reply_template",
-            "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n请在后台配置文件中输入解锁码 {unlock_code} 并保存后，由管理员发送「{unlock_command}」指令解锁。"
+            "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n解锁码: {unlock_code}\n（有效期 {unlock_code_interval} 秒）\n\n请在后台配置文件中输入解锁码并保存后，由管理员发送「{unlock_command}」指令解锁。"
         )
         self.locked_reply_template = config.get(
             "locked_reply_template",
-            "🔒 当前群已被锁定\n原因: {reason}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令"
+            "🔒 当前群已被锁定\n原因: {reason}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令\n（解锁码每 {unlock_code_interval} 秒变化一次）"
         )
         
         # 支持字符串配置，转换为列表
@@ -148,20 +149,46 @@ class SleepPlugin(Star):
         if self.group_card_enabled:
             logger.info(f"[Sleep] 群昵称更新已启用 | 普通模板: {self.group_card_template} | 自动模板: {self.group_card_template_auto} | 锁定模板: {self.group_card_template_locked}")
 
-    def _generate_unlock_code(self, group_id: str) -> str:
-        """生成基于群号的6位解锁码（2FA风格）
+    def _generate_unlock_code(self, group_id: str, timestamp: float = None) -> str:
+        """生成基于群号和时间戳的6位解锁码（TOTP风格）
         
-        使用 HMAC-SHA256 算法，基于群号和密钥生成
+        使用 HMAC-SHA256 算法，基于群号、时间戳和密钥生成
+        解锁码会随时间变化，增加安全性
+        
+        Args:
+            group_id: 群号
+            timestamp: 时间戳，默认使用当前时间
         """
-        data = f"{group_id}:{self.lock_secret}"
+        if timestamp is None:
+            timestamp = time.time()
+        
+        # 计算时间步长（每 interval 秒变化一次）
+        time_step = int(timestamp // self.unlock_code_interval)
+        
+        data = f"{group_id}:{time_step}:{self.lock_secret}"
         hash_value = hashlib.sha256(data.encode()).hexdigest()
         code = int(hash_value[:8], 16) % 1000000
         return f"{code:06d}"
 
     def _verify_unlock_code(self, group_id: str, code: str) -> bool:
-        """验证解锁码是否正确"""
-        expected_code = self._generate_unlock_code(group_id)
-        return hmac.compare_digest(code, expected_code)
+        """验证解锁码是否正确
+        
+        支持当前时间步和前一个时间步的解锁码（允许一定的时间误差）
+        """
+        current_time = time.time()
+        
+        # 检查当前时间步
+        expected_code = self._generate_unlock_code(group_id, current_time)
+        if hmac.compare_digest(code, expected_code):
+            return True
+        
+        # 检查前一个时间步（允许时间误差）
+        prev_time = current_time - self.unlock_code_interval
+        prev_code = self._generate_unlock_code(group_id, prev_time)
+        if hmac.compare_digest(code, prev_code):
+            return True
+        
+        return False
 
     def _get_duration_config(self, key: str, default: int, min_val: int, max_val: int) -> int:
         """获取时长配置并验证范围"""
@@ -648,6 +675,7 @@ class SleepPlugin(Star):
                     unlock_code=lock_info.get("unlock_code", "??????"),
                     unlock_command=self.unlock_cmd,
                     group_id=lock_info.get("group_id", "未知"),
+                    unlock_code_interval=self.unlock_code_interval,
                 )
             except KeyError as e:
                 logger.warning(f"[Sleep] 锁定提示模板占位符错误: {e}")
@@ -949,6 +977,7 @@ class SleepPlugin(Star):
                 unlock_code=unlock_code,
                 unlock_command=self.unlock_cmd,
                 group_id=str(group_id),
+                unlock_code_interval=self.unlock_code_interval,
             )
         except KeyError as e:
             logger.warning(f"[Sleep] 锁定提示模板占位符错误: {e}")
@@ -956,7 +985,8 @@ class SleepPlugin(Star):
                 f"🔒 已锁定当前群\n"
                 f"原因: {reason}\n"
                 f"锁定时间: {lock_time}\n\n"
-                f"解锁码: {unlock_code}"
+                f"解锁码: {unlock_code}\n"
+                f"（有效期 {self.unlock_code_interval} 秒）"
             )
 
     async def terminate(self):
