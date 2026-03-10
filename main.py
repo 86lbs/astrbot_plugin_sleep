@@ -43,16 +43,18 @@ class SleepPlugin(Star):
         self.clear_lock_on_startup = config.get("clear_lock_on_startup", True)  # 启动时清空锁定记录
         self.unlock_code_interval = config.get("unlock_code_interval", 60)  # 解锁码有效期（秒）
         self.enable_force_unlock = config.get("enable_force_unlock", True)  # 启用强制解锁
-        self.locked_reply_cooldown = config.get("locked_reply_cooldown", 30)  # 锁定提醒冷却时间（秒）
+        
+        # 锁定提醒记录 {origin: last_unlock_code} 用于判断解锁码是否变化
+        self.locked_last_code: dict[str, str] = {}
         
         # 锁定提示模板
         self.lock_reply_template = config.get(
             "lock_reply_template",
-            "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n解锁码: {unlock_code}\n（有效期 {unlock_code_interval} 秒）\n\n请在后台配置文件中输入解锁码并保存后，由管理员发送「{unlock_command}」指令解锁。"
+            "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n解锁码: {unlock_code}\n有效期至: {unlock_code_expiry}\n\n请在后台配置文件中输入解锁码并保存后，由管理员发送「{unlock_command}」指令解锁。"
         )
         self.locked_reply_template = config.get(
             "locked_reply_template",
-            "🔒 当前群已被锁定\n原因: {reason}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令\n（解锁码每 {unlock_code_interval} 秒变化一次）"
+            "🔒 当前群已被锁定\n原因: {reason}\n\n解锁码: {unlock_code}\n有效期至: {unlock_code_expiry}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令"
         )
         
         # 支持字符串配置，转换为列表
@@ -104,9 +106,6 @@ class SleepPlugin(Star):
         
         # 敏感锁定记录 {origin: {"reason": str, "lock_time": float, "unlock_code": str}}
         self.locked_origins: dict[str, dict] = {}
-        
-        # 锁定提醒冷却记录 {origin: last_reply_time}
-        self.locked_reply_times: dict[str, float] = {}
 
         self.sleep_map = {}
         self.data_dir = (
@@ -174,6 +173,24 @@ class SleepPlugin(Star):
         hash_value = hashlib.sha256(data.encode()).hexdigest()
         code = int(hash_value[:8], 16) % 1000000
         return f"{code:06d}"
+
+    def _get_unlock_code_expiry(self, timestamp: float = None) -> str:
+        """获取解锁码到期时间
+        
+        Args:
+            timestamp: 当前时间戳，默认使用当前时间
+            
+        Returns:
+            到期时间字符串，格式: YYYY-MM-DD HH:MM:SS
+        """
+        if timestamp is None:
+            timestamp = time.time()
+        
+        # 计算当前时间步的结束时间
+        time_step = int(timestamp // self.unlock_code_interval)
+        expiry_timestamp = (time_step + 1) * self.unlock_code_interval
+        
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry_timestamp))
 
     def _verify_unlock_code(self, group_id: str, code: str) -> bool:
         """验证解锁码是否正确
@@ -609,6 +626,9 @@ class SleepPlugin(Star):
 
         # 检查是否是敏感锁定状态
         if origin in self.locked_origins:
+            lock_info = self.locked_origins.get(origin, {})
+            group_id = lock_info.get("group_id", "")
+            
             # 检查是否是解锁指令
             if text.startswith(self.unlock_cmd):
                 if not self._check_admin(event):
@@ -618,12 +638,14 @@ class SleepPlugin(Star):
                 
                 # 检查配置文件中的解锁码
                 if not self.unlock_code_input:
-                    yield event.plain_result("⚠️ 请先在配置文件中输入解锁码")
+                    # 发送当前解锁码提示
+                    current_code = self._generate_unlock_code(str(group_id)) if group_id else "??????"
+                    expiry = self._get_unlock_code_expiry()
+                    yield event.plain_result(f"⚠️ 请先在配置文件中输入解锁码\n\n当前解锁码: {current_code}\n有效期至: {expiry}")
                     event.stop_event()
                     return
                 
                 # 获取群号
-                group_id = event.get_group_id()
                 if not group_id:
                     yield event.plain_result("⚠️ 无法获取群信息")
                     event.stop_event()
@@ -632,7 +654,8 @@ class SleepPlugin(Star):
                 # 验证解锁码
                 if self._verify_unlock_code(str(group_id), self.unlock_code_input):
                     # 解锁成功
-                    lock_info = self.locked_origins.pop(origin, {})
+                    self.locked_origins.pop(origin, {})
+                    self.locked_last_code.pop(origin, None)
                     self._save_locked_map()
                     
                     # 清除配置中的解锁码
@@ -649,18 +672,19 @@ class SleepPlugin(Star):
                     logger.info(f"[Sleep] 🔓 敏感锁定已解除 | 来源: {origin}")
                     yield event.plain_result("🔓 解锁成功，已恢复正常状态")
                 else:
-                    yield event.plain_result("⚠️ 解锁码错误，请检查配置文件中的解锁码")
+                    # 解锁码错误，发送当前解锁码提示
+                    current_code = self._generate_unlock_code(str(group_id))
+                    expiry = self._get_unlock_code_expiry()
+                    yield event.plain_result(f"⚠️ 解锁码错误\n\n当前解锁码: {current_code}\n有效期至: {expiry}")
                 
                 event.stop_event()
                 return
             
             # 紧急解锁：管理员发送特定指令强制解锁（兜底）
             if self.enable_force_unlock and text == "强制解锁" and self._check_admin(event):
-                lock_info = self.locked_origins.pop(origin, {})
+                self.locked_origins.pop(origin, {})
+                self.locked_last_code.pop(origin, None)
                 self._save_locked_map()
-                
-                # 清除提醒冷却记录
-                self.locked_reply_times.pop(origin, None)
                 
                 # 恢复群昵称
                 if self.group_card_enabled:
@@ -673,35 +697,32 @@ class SleepPlugin(Star):
                 event.stop_event()
                 return
             
-            # 其他消息一律拦截（带冷却机制）
-            current_time = time.time()
-            last_reply_time = self.locked_reply_times.get(origin, 0)
+            # 其他消息：检查是否需要发送提醒（解锁码变化时）
+            if group_id:
+                current_code = self._generate_unlock_code(str(group_id))
+                last_code = self.locked_last_code.get(origin, "")
+                
+                # 解锁码变化了，发送新提醒
+                if current_code != last_code:
+                    self.locked_last_code[origin] = current_code
+                    expiry = self._get_unlock_code_expiry()
+                    lock_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(lock_info.get("lock_time", 0)))
+                    
+                    try:
+                        reply = self.locked_reply_template.format(
+                            reason=lock_info.get("reason", "敏感内容"),
+                            lock_time=lock_time,
+                            unlock_code=current_code,
+                            unlock_command=self.unlock_cmd,
+                            group_id=group_id,
+                            unlock_code_expiry=expiry,
+                        )
+                    except KeyError as e:
+                        logger.warning(f"[Sleep] 锁定提示模板占位符错误: {e}")
+                        reply = f"🔒 当前群已被锁定\n原因: {lock_info.get('reason', '敏感内容')}\n\n解锁码: {current_code}\n有效期至: {expiry}"
+                    yield event.plain_result(reply)
             
-            # 检查是否在冷却时间内
-            if current_time - last_reply_time < self.locked_reply_cooldown:
-                # 在冷却期内，不发送提醒，只拦截消息
-                event.should_call_llm(False)
-                event.stop_event()
-                return
-            
-            # 更新最后提醒时间
-            self.locked_reply_times[origin] = current_time
-            
-            lock_info = self.locked_origins.get(origin, {})
-            lock_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(lock_info.get("lock_time", 0)))
-            try:
-                reply = self.locked_reply_template.format(
-                    reason=lock_info.get("reason", "敏感内容"),
-                    lock_time=lock_time,
-                    unlock_code=lock_info.get("unlock_code", "??????"),
-                    unlock_command=self.unlock_cmd,
-                    group_id=lock_info.get("group_id", "未知"),
-                    unlock_code_interval=self.unlock_code_interval,
-                )
-            except KeyError as e:
-                logger.warning(f"[Sleep] 锁定提示模板占位符错误: {e}")
-                reply = f"🔒 当前群已被锁定\n原因: {lock_info.get('reason', '敏感内容')}"
-            yield event.plain_result(reply)
+            # 拦截消息
             event.should_call_llm(False)
             event.stop_event()
             return
@@ -987,6 +1008,7 @@ class SleepPlugin(Star):
             await self._update_group_card(event, origin, 0, False, True)
 
         lock_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        expiry = self._get_unlock_code_expiry()
         logger.warning(
             f"[Sleep] 🔒 LLM 敏感锁定 | 原因: {reason} | 群号: {group_id} | 解锁码: {unlock_code}"
         )
@@ -998,7 +1020,7 @@ class SleepPlugin(Star):
                 unlock_code=unlock_code,
                 unlock_command=self.unlock_cmd,
                 group_id=str(group_id),
-                unlock_code_interval=self.unlock_code_interval,
+                unlock_code_expiry=expiry,
             )
         except KeyError as e:
             logger.warning(f"[Sleep] 锁定提示模板占位符错误: {e}")
@@ -1007,7 +1029,7 @@ class SleepPlugin(Star):
                 f"原因: {reason}\n"
                 f"锁定时间: {lock_time}\n\n"
                 f"解锁码: {unlock_code}\n"
-                f"（有效期 {self.unlock_code_interval} 秒）"
+                f"有效期至: {expiry}"
             )
 
     async def terminate(self):

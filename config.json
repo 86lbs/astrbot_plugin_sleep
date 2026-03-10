@@ -29,12 +29,6 @@
         "default": true,
         "hint": "启用后，管理员可发送「强制解锁」直接解锁（兜底机制）"
     },
-    "locked_reply_cooldown": {
-        "description": "锁定提醒冷却时间（秒）",
-        "type": "int",
-        "default": 30,
-        "hint": "锁定状态下发送提醒的冷却时间，设为0则每次都提醒"
-    },
     "require_prefix": {
         "description": "是否需要前缀触发",
         "type": "bool",
@@ -110,14 +104,14 @@
     "lock_reply_template": {
         "description": "锁定时的提示模板",
         "type": "string",
-        "default": "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n解锁码: {unlock_code}\n（有效期 {unlock_code_interval} 秒）\n\n请在后台配置文件中输入解锁码并保存后，由管理员发送「{unlock_command}」指令解锁。",
-        "hint": "触发锁定时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}, {unlock_code_interval}"
+        "default": "🔒 当前群已被锁定\n原因: {reason}\n锁定时间: {lock_time}\n\n解锁码: {unlock_code}\n有效期至: {unlock_code_expiry}\n\n请在后台配置文件中输入解锁码并保存后，由管理员发送「{unlock_command}」指令解锁。",
+        "hint": "触发锁定时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}, {unlock_code_expiry}"
     },
     "locked_reply_template": {
         "description": "已锁定状态的提示模板",
         "type": "string",
-        "default": "🔒 当前群已被锁定\n原因: {reason}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令\n（解锁码每 {unlock_code_interval} 秒变化一次）",
-        "hint": "锁定后发送消息时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}, {unlock_code_interval}"
+        "default": "🔒 当前群已被锁定\n原因: {reason}\n\n解锁码: {unlock_code}\n有效期至: {unlock_code_expiry}\n\n请在后台配置文件中输入正确的解锁码后，由管理员发送解锁指令",
+        "hint": "锁定后发送消息时的提示。支持变量: {reason}, {lock_time}, {unlock_code}, {unlock_command}, {group_id}, {unlock_code_expiry}"
     },
     "scheduled_sleep_enabled": {
         "description": "启用定时睡觉",
