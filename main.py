@@ -42,6 +42,8 @@ class SleepPlugin(Star):
         self.unlock_code_input = config.get("unlock_code_input", "")  # 用户输入的解锁码
         self.clear_lock_on_startup = config.get("clear_lock_on_startup", True)  # 启动时清空锁定记录
         self.unlock_code_interval = config.get("unlock_code_interval", 60)  # 解锁码有效期（秒）
+        self.enable_force_unlock = config.get("enable_force_unlock", True)  # 启用强制解锁
+        self.locked_reply_cooldown = config.get("locked_reply_cooldown", 30)  # 锁定提醒冷却时间（秒）
         
         # 锁定提示模板
         self.lock_reply_template = config.get(
@@ -102,6 +104,9 @@ class SleepPlugin(Star):
         
         # 敏感锁定记录 {origin: {"reason": str, "lock_time": float, "unlock_code": str}}
         self.locked_origins: dict[str, dict] = {}
+        
+        # 锁定提醒冷却记录 {origin: last_reply_time}
+        self.locked_reply_times: dict[str, float] = {}
 
         self.sleep_map = {}
         self.data_dir = (
@@ -650,9 +655,12 @@ class SleepPlugin(Star):
                 return
             
             # 紧急解锁：管理员发送特定指令强制解锁（兜底）
-            if text == "强制解锁" and self._check_admin(event):
+            if self.enable_force_unlock and text == "强制解锁" and self._check_admin(event):
                 lock_info = self.locked_origins.pop(origin, {})
                 self._save_locked_map()
+                
+                # 清除提醒冷却记录
+                self.locked_reply_times.pop(origin, None)
                 
                 # 恢复群昵称
                 if self.group_card_enabled:
@@ -665,7 +673,20 @@ class SleepPlugin(Star):
                 event.stop_event()
                 return
             
-            # 其他消息一律拦截
+            # 其他消息一律拦截（带冷却机制）
+            current_time = time.time()
+            last_reply_time = self.locked_reply_times.get(origin, 0)
+            
+            # 检查是否在冷却时间内
+            if current_time - last_reply_time < self.locked_reply_cooldown:
+                # 在冷却期内，不发送提醒，只拦截消息
+                event.should_call_llm(False)
+                event.stop_event()
+                return
+            
+            # 更新最后提醒时间
+            self.locked_reply_times[origin] = current_time
+            
             lock_info = self.locked_origins.get(origin, {})
             lock_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(lock_info.get("lock_time", 0)))
             try:
