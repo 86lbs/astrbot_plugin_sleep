@@ -1,15 +1,15 @@
 {
     "sleep_commands": {
-        "description": "睡觉指令",
-        "type": "string",
-        "default": "睡觉,sleep",
-        "hint": "触发睡觉的指令，多个用逗号分隔"
+        "description": "睡觉指令列表",
+        "type": "list",
+        "default": ["睡觉", "sleep"],
+        "hint": "触发睡觉的指令"
     },
     "wake_commands": {
-        "description": "起床指令",
-        "type": "string",
-        "default": "起床,醒来,wake",
-        "hint": "触发起床的指令，多个用逗号分隔"
+        "description": "起床指令列表",
+        "type": "list",
+        "default": ["起床", "醒来", "wake"],
+        "hint": "触发起床的指令"
     },
     "unlock_command": {
         "description": "解锁指令",

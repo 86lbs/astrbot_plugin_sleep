@@ -1,15 +1,17 @@
 {
   "sleep_commands": {
-    "type": "string",
-    "description": "睡觉指令",
-    "hint": "触发睡觉的指令，多个用逗号分隔",
-    "default": "睡觉,sleep"
+    "type": "list",
+    "description": "睡觉指令列表",
+    "hint": "触发睡觉的指令",
+    "items": { "type": "string" },
+    "default": ["睡觉", "sleep"]
   },
   "wake_commands": {
-    "type": "string",
-    "description": "起床指令",
-    "hint": "触发起床的指令，多个用逗号分隔",
-    "default": "起床,醒来,wake"
+    "type": "list",
+    "description": "起床指令列表",
+    "hint": "触发起床的指令",
+    "items": { "type": "string" },
+    "default": ["起床", "醒来", "wake"]
   },
   "unlock_command": {
     "type": "string",
