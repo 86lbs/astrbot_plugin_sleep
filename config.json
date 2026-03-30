@@ -19,32 +19,32 @@
     },
     "unlock_command": {
         "description": "解锁指令",
-        "type": "string",
+        "type": "list",
         "default": "解锁",
         "hint": "敏感锁定后的解锁指令"
     },
     "enable_force_unlock": {
         "description": "启用强制解锁",
         "type": "bool",
-        "default": true,
+        "default": false,
         "hint": "启用后，管理员可发送「强制解锁」直接解锁（兜底机制）"
     },
     "require_prefix": {
         "description": "是否需要前缀触发",
         "type": "bool",
-        "default": false,
+        "default": true,
         "hint": "启用后，指令需要加上配置的唤醒前缀才能触发"
     },
     "sleep_require_admin": {
         "description": "睡觉是否需要管理员权限",
         "type": "bool",
-        "default": false,
+        "default": true,
         "hint": "启用后，只有管理员才能触发睡觉指令"
     },
     "wake_require_admin": {
         "description": "起床是否需要管理员权限",
         "type": "bool",
-        "default": false,
+        "default": true,
         "hint": "启用后，只有管理员才能触发起床指令"
     },
     "default_duration": {
@@ -74,7 +74,7 @@
     "wake_reply": {
         "description": "起床回复语",
         "type": "string",
-        "default": "早安~我醒来了☀️",
+        "default": "我醒来了☀️",
         "hint": "支持变量: {duration}(已睡觉时长秒), {expiry_time}(当前时间)"
     },
     "llm_tool_enabled": {
