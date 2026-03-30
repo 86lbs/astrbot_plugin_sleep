@@ -29,25 +29,25 @@
     "type": "bool",
     "description": "启用强制解锁",
     "hint": "启用后，管理员可发送「强制解锁」直接解锁（兜底机制）",
-    "default": true
+    "default": false
   },
   "require_prefix": {
     "type": "bool",
     "description": "是否需要前缀触发",
     "hint": "启用后，指令需要加上配置的唤醒前缀才能触发",
-    "default": false
+    "default": true
   },
   "sleep_require_admin": {
     "type": "bool",
     "description": "睡觉是否需要管理员权限",
     "hint": "启用后，只有管理员才能触发睡觉指令",
-    "default": false
+    "default": true
   },
   "wake_require_admin": {
     "type": "bool",
     "description": "起床是否需要管理员权限",
     "hint": "启用后，只有管理员才能触发起床指令",
-    "default": false
+    "default": true
   },
   "default_duration": {
     "type": "int",
@@ -77,7 +77,7 @@
     "type": "string",
     "description": "起床回复语",
     "hint": "支持变量: {duration}(已睡觉时长秒), {expiry_time}(当前时间)",
-    "default": "早安~我醒来了☀️"
+    "default": "我醒来了☀️"
   },
   "llm_tool_enabled": {
     "type": "bool",
